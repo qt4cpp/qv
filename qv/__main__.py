@@ -24,6 +24,9 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.frame.setLayout(self.vl)
         self.setCentralWidget(self.frame)
 
+        self.status_label = QtWidgets.QLabel()
+        self.statusBar().addPermanentWidget(self.status_label)
+
         self.renderer = vtk.vtkRenderer()
         self.vtk_widget.GetRenderWindow().AddRenderer(self.renderer)
         self.interactor = self.vtk_widget.GetRenderWindow().GetInteractor()
@@ -43,6 +46,14 @@ class VolumeViewer(QtWidgets.QMainWindow):
 
         self.show()
         self.interactor.Initialize()
+
+    def update_status_label(self) -> None:
+        if self.window_level is not None and self.window_width is not None:
+            self.status_label.setText(
+                f"Center: {self.window_level:.2f}  Range: {self.window_width:.2f}"
+            )
+        else:
+            self.status_label.setText("")
 
     def load_volume(self, dicom_dir: str) -> None:
         image = load_dicom_series(dicom_dir)
@@ -70,6 +81,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.renderer.ResetCamera()
         self.update_transfer_functions()
         self.vtk_widget.GetRenderWindow().Render()
+        self.update_status_label()
 
     def update_transfer_functions(self) -> None:
         if self.color_func is None or self.opacity_func is None:
@@ -102,6 +114,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
             self.window_level = max(self.scalar_range[0], min(self.scalar_range[1], self.window_level))
 
         self.update_transfer_functions()
+        self.update_status_label()
 
     def eventFilter(self, obj: QtCore.QObject, event: QtCore.QEvent) -> bool:
         if obj is self.vtk_widget:
