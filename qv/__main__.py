@@ -36,8 +36,6 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self._left_dragging = False
         self._last_pos = QtCore.QPoint()
         self.rotation_factor = rotation_factor
-        self.azimuth: float = 0.0
-        self.elevation: float = 0.0
 
         self.scalar_range: tuple[float, float] | None = None
         self.window_width: float | None = None
@@ -50,18 +48,14 @@ class VolumeViewer(QtWidgets.QMainWindow):
 
         self.show()
         self.interactor.Initialize()
-        self.update_status_label()
 
     def update_status_label(self) -> None:
-        parts = []
         if self.window_level is not None and self.window_width is not None:
-            parts.append(
+            self.status_label.setText(
                 f"Center: {self.window_level:.2f}  Range: {self.window_width:.2f}"
             )
-        parts.append(
-            f"Azimuth: {self.azimuth:.1f}°  Elevation: {self.elevation:.1f}°"
-        )
-        self.status_label.setText("  ".join(parts))
+        else:
+            self.status_label.setText("")
 
     def load_volume(self, dicom_dir: str) -> None:
         image = load_dicom_series(dicom_dir)
@@ -126,15 +120,11 @@ class VolumeViewer(QtWidgets.QMainWindow):
 
     def rotate_camera(self, dx: int, dy: int) -> None:
         camera = self.renderer.GetActiveCamera()
-        delta_az = -dx * self.rotation_factor
-        delta_el = -dy * self.rotation_factor
-        camera.Azimuth(delta_az)
-        camera.Elevation(delta_el)
-        self.azimuth += delta_az
-        self.elevation += delta_el
+        camera.Azimuth((-dx * self.rotation_factor) % 360)
+        camera.Elevation((dy * self.rotation_factor))
+        camera.OrthogonalizeViewUp()
         self.renderer.ResetCameraClippingRange()
         self.vtk_widget.GetRenderWindow().Render()
-        self.update_status_label()
 
     def eventFilter(self, obj: QtCore.QObject, event: QtCore.QEvent) -> bool:
         if obj is self.vtk_widget:
