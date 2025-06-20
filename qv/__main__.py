@@ -1,6 +1,6 @@
 import os
 import sys
-from PySide6 import QtWidgets
+from PySide6 import QtWidgets, QtCore
 from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 import vtk
 
@@ -28,6 +28,16 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.vtk_widget.GetRenderWindow().AddRenderer(self.renderer)
         self.interactor = self.vtk_widget.GetRenderWindow().GetInteractor()
 
+        self.vtk_widget.installEventFilter(self)
+        self._right_dragging = False
+        self._last_pos = QtCore.QPoint()
+
+        self.scalar_range: tuple[float, float] | None = None
+        self.window_width: float | None = None
+        self.window_level: float | None = None
+        self.color_func: vtk.vtkColorTransferFunction | None = None
+        self.opacity_func: vtk.vtkPiecewiseFunction | None = None
+
         if dicom_dir:
             self.load_volume(dicom_dir)
 
@@ -36,34 +46,80 @@ class VolumeViewer(QtWidgets.QMainWindow):
 
     def load_volume(self, dicom_dir: str) -> None:
         image = load_dicom_series(dicom_dir)
+        self.scalar_range = image.GetScalarRange()
+        self.window_width = self.scalar_range[1] - self.scalar_range[0]
+        self.window_level = sum(self.scalar_range) / 2
+
         mapper = vtk.vtkGPUVolumeRayCastMapper()
         mapper.SetInputData(image)
 
-        color_func = vtk.vtkColorTransferFunction()
-        color_func.AddRGBPoint(0, 0.0, 0.0, 0.0)
-        color_func.AddRGBPoint(500, 1.0, 0.5, 0.3)
-        color_func.AddRGBPoint(1000, 1.0, 0.5, 0.3)
-        color_func.AddRGBPoint(1150, 1.0, 1.0, 0.9)
+        self.color_func = vtk.vtkColorTransferFunction()
+        self.opacity_func = vtk.vtkPiecewiseFunction()
 
-        opacity_func = vtk.vtkPiecewiseFunction()
-        opacity_func.AddPoint(0, 0.00)
-        opacity_func.AddPoint(500, 0.15)
-        opacity_func.AddPoint(1000, 0.15)
-        opacity_func.AddPoint(1150, 0.85)
+        self.volume_property = vtk.vtkVolumeProperty()
+        self.volume_property.SetColor(self.color_func)
+        self.volume_property.SetScalarOpacity(self.opacity_func)
+        self.volume_property.ShadeOn()
+        self.volume_property.SetInterpolationTypeToLinear()
 
-        volume_property = vtk.vtkVolumeProperty()
-        volume_property.SetColor(color_func)
-        volume_property.SetScalarOpacity(opacity_func)
-        volume_property.ShadeOn()
-        volume_property.SetInterpolationTypeToLinear()
+        self.volume = vtk.vtkVolume()
+        self.volume.SetMapper(mapper)
+        self.volume.SetProperty(self.volume_property)
 
-        volume = vtk.vtkVolume()
-        volume.SetMapper(mapper)
-        volume.SetProperty(volume_property)
-
-        self.renderer.AddVolume(volume)
+        self.renderer.AddVolume(self.volume)
         self.renderer.ResetCamera()
+        self.update_transfer_functions()
         self.vtk_widget.GetRenderWindow().Render()
+
+    def update_transfer_functions(self) -> None:
+        if self.color_func is None or self.opacity_func is None:
+            return
+
+        min_val = self.window_level - self.window_width / 2
+        max_val = self.window_level + self.window_width / 2
+
+        self.color_func.RemoveAllPoints()
+        self.color_func.AddRGBPoint(min_val, 0.0, 0.0, 0.0)
+        self.color_func.AddRGBPoint(max_val, 1.0, 1.0, 1.0)
+
+        self.opacity_func.RemoveAllPoints()
+        self.opacity_func.AddPoint(min_val, 0.0)
+        self.opacity_func.AddPoint(max_val, 1.0)
+
+        self.vtk_widget.GetRenderWindow().Render()
+
+    def adjust_window_level(self, dx: int, dy: int) -> None:
+        if self.window_width is None or self.window_level is None:
+            return
+
+        self.window_width += dx * self.window_width * 0.01
+        if self.scalar_range is not None:
+            max_width = self.scalar_range[1] - self.scalar_range[0]
+            self.window_width = max(1.0, min(max_width, self.window_width))
+
+        self.window_level += -dy * self.window_width * 0.01
+        if self.scalar_range is not None:
+            self.window_level = max(self.scalar_range[0], min(self.scalar_range[1], self.window_level))
+
+        self.update_transfer_functions()
+
+    def eventFilter(self, obj: QtCore.QObject, event: QtCore.QEvent) -> bool:
+        if obj is self.vtk_widget:
+            if event.type() == QtCore.QEvent.MouseButtonPress and event.button() == QtCore.Qt.RightButton:
+                self._right_dragging = True
+                self._last_pos = event.pos()
+                return True
+            if event.type() == QtCore.QEvent.MouseMove and self._right_dragging:
+                pos = event.pos()
+                dx = pos.x() - self._last_pos.x()
+                dy = pos.y() - self._last_pos.y()
+                self._last_pos = pos
+                self.adjust_window_level(dx, dy)
+                return True
+            if event.type() == QtCore.QEvent.MouseButtonRelease and event.button() == QtCore.Qt.RightButton:
+                self._right_dragging = False
+                return True
+        return super().eventFilter(obj, event)
 
 
 def select_dicom_directory() -> str | None:
