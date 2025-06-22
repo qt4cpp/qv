@@ -1,3 +1,4 @@
+import copy
 import math
 import os
 import sys
@@ -8,7 +9,7 @@ from PySide6.QtWidgets import QLabel
 from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 import vtk
 
-from qv.status import STATUS_FIELDS
+from qv.status import STATUS_FIELDS, StatusField
 
 
 def load_dicom_series(directory: str) -> vtk.vtkImageData:
@@ -30,9 +31,6 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.frame.setLayout(self.vl)
         self.setCentralWidget(self.frame)
 
-        # self.status_label = QtWidgets.QLabel()
-        # self.statusBar().addPermanentWidget(self.status_label)
-
         self.renderer = vtk.vtkRenderer()
         self.vtk_widget.GetRenderWindow().AddRenderer(self.renderer)
         self.interactor = self.vtk_widget.GetRenderWindow().GetInteractor()
@@ -43,15 +41,19 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self._last_pos = QtCore.QPoint()
         self.rotation_factor = rotation_factor
 
+        self.status_fields: dict[str, StatusField] = {
+            k: copy.deepcopy(v) for k, v in STATUS_FIELDS.items()
+        }
+
         self._status_label = {}
-        for key, field in STATUS_FIELDS.items():
+        for key, field in self.status_fields.items():
             label = QLabel("", self)
             self.statusBar().addPermanentWidget(label)
             self._status_label[key] = label
 
         self.scalar_range: tuple[float, float] | None = None
-        self.window_width: float | None = None
-        self.window_level: float | None = None
+        # self.window_width: float | None = None
+        # self.window_level: float | None = None
         self.color_func: vtk.vtkColorTransferFunction | None = None
         self.opacity_func: vtk.vtkPiecewiseFunction | None = None
 
@@ -63,16 +65,20 @@ class VolumeViewer(QtWidgets.QMainWindow):
 
     def update_status(self, **kwargs):
         for key, value in kwargs.items():
-            field = STATUS_FIELDS.get(key)
+            field = self.status_fields.get(key)
             if field is not None:
-                field.value = value
-                self._status_label[key].setText(field.formatter(value))
+                self.status_fields[key].value = value
+
+    def _refresh_status_label(self, key: str) -> None:
+        value = self.status_fields[key].value
+        self._status_label[key].setText(self.status_fields[key].formatter(value))
 
     def load_volume(self, dicom_dir: str) -> None:
         image = load_dicom_series(dicom_dir)
         self.scalar_range = image.GetScalarRange()
         self.window_width = self.scalar_range[1] - self.scalar_range[0]
         self.window_level = sum(self.scalar_range) / 2
+        self.azimuth, self.elevation = self.get_camera_angles(self.renderer.GetActiveCamera())
 
         mapper = vtk.vtkGPUVolumeRayCastMapper()
         mapper.SetInputData(image)
@@ -95,7 +101,6 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.update_transfer_functions()
         # self.test_AddRGBPoint()
         self.vtk_widget.GetRenderWindow().Render()
-        self.update_status()
 
     def test_AddRGBPoint(self) -> None:
         self.color_func.AddRGBPoint(0.0, 0.0, 0.0, 0.0)
@@ -136,7 +141,6 @@ class VolumeViewer(QtWidgets.QMainWindow):
             window_level = max(self.scalar_range[0], min(self.scalar_range[1], self.window_level))
 
         self.update_transfer_functions()
-        self.update_status(window_width=window_width, window_level=window_level)
 
     def rotate_camera(self, dx: int, dy: int) -> None:
         camera = self.renderer.GetActiveCamera()
@@ -146,7 +150,8 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.renderer.ResetCameraClippingRange()
         self.vtk_widget.GetRenderWindow().Render()
         azimuth, elevation = self.get_camera_angles(camera)
-        self.update_status(azimuth=azimuth, elevation=elevation)
+        self.azimuth = azimuth
+        self.elevation = elevation
 
     def get_camera_angles(self, camera: vtk.vtkCamera):
         # 1) 方向ベクトルを取得
@@ -201,6 +206,42 @@ class VolumeViewer(QtWidgets.QMainWindow):
                     self._left_dragging = False
                     return True
         return super().eventFilter(obj, event)
+
+    @property
+    def azimuth(self) -> float:
+        return self.status_fields["azimuth"].value
+
+    @azimuth.setter
+    def azimuth(self, value: float):
+        self.status_fields["azimuth"].value = value
+        self._refresh_status_label("azimuth")
+
+    @property
+    def elevation(self) -> float:
+        return self.status_fields["elevation"].value
+
+    @elevation.setter
+    def elevation(self, value: float):
+        self.status_fields["elevation"].value = value
+        self._refresh_status_label("elevation")
+
+    @property
+    def window_width(self) -> float:
+        return self.status_fields["window_width"].value
+
+    @window_width.setter
+    def window_width(self, value: float):
+        self.status_fields["window_width"].value = value
+        self._refresh_status_label("window_width")
+
+    @property
+    def window_level(self) -> float:
+        return self.status_fields["window_level"].value
+
+    @window_level.setter
+    def window_level(self, value: float):
+        self.status_fields["window_level"].value = value
+        self._refresh_status_label("window_level")
 
 
 def select_dicom_directory() -> str | None:
