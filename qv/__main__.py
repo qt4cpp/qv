@@ -52,8 +52,6 @@ class VolumeViewer(QtWidgets.QMainWindow):
             self._status_label[key] = label
 
         self.scalar_range: tuple[float, float] | None = None
-        # self.window_width: float | None = None
-        # self.window_level: float | None = None
         self.color_func: vtk.vtkColorTransferFunction | None = None
         self.opacity_func: vtk.vtkPiecewiseFunction | None = None
 
@@ -70,6 +68,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
                 self.status_fields[key].value = value
 
     def _refresh_status_label(self, key: str) -> None:
+        """Refresh the status label for the given key."""
         value = self.status_fields[key].value
         self._status_label[key].setText(self.status_fields[key].formatter(value))
 
