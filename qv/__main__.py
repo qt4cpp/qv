@@ -148,9 +148,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
         camera.OrthogonalizeViewUp()
         self.renderer.ResetCameraClippingRange()
         self.vtk_widget.GetRenderWindow().Render()
-        azimuth, elevation = self.get_camera_angles(camera)
-        self.azimuth = azimuth
-        self.elevation = elevation
+        self.azimuth, self.elevation = self.get_camera_angles(camera)
 
     def get_camera_angles(self, camera: vtk.vtkCamera):
         # 1) 方向ベクトルを取得
