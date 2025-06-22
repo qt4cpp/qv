@@ -31,8 +31,8 @@ def format_azimuth(azimuth: float) -> str:
 def format_elevation(elevation: float) -> str:
     """
     Format the elevation angle on vtk in degrees.
-    + -> CRA
-    - -> CAU
+    + -> CAU
+    - -> CRA
     """
     angle = abs(elevation)
     if elevation >= 0:
