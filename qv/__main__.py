@@ -1,8 +1,14 @@
+import math
 import os
 import sys
+
+import numpy as np
 from PySide6 import QtWidgets, QtCore
+from PySide6.QtWidgets import QLabel
 from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 import vtk
+
+from qv.status import STATUS_FIELDS
 
 
 def load_dicom_series(directory: str) -> vtk.vtkImageData:
@@ -24,8 +30,8 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.frame.setLayout(self.vl)
         self.setCentralWidget(self.frame)
 
-        self.status_label = QtWidgets.QLabel()
-        self.statusBar().addPermanentWidget(self.status_label)
+        # self.status_label = QtWidgets.QLabel()
+        # self.statusBar().addPermanentWidget(self.status_label)
 
         self.renderer = vtk.vtkRenderer()
         self.vtk_widget.GetRenderWindow().AddRenderer(self.renderer)
@@ -36,6 +42,12 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self._left_dragging = False
         self._last_pos = QtCore.QPoint()
         self.rotation_factor = rotation_factor
+
+        self._status_label = {}
+        for key, field in STATUS_FIELDS.items():
+            label = QLabel("", self)
+            self.statusBar().addPermanentWidget(label)
+            self._status_label[key] = label
 
         self.scalar_range: tuple[float, float] | None = None
         self.window_width: float | None = None
@@ -49,13 +61,12 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.show()
         self.interactor.Initialize()
 
-    def update_status_label(self) -> None:
-        if self.window_level is not None and self.window_width is not None:
-            self.status_label.setText(
-                f"Center: {self.window_level:.2f}  Range: {self.window_width:.2f}"
-            )
-        else:
-            self.status_label.setText("")
+    def update_status(self, **kwargs):
+        for key, value in kwargs.items():
+            field = STATUS_FIELDS.get(key)
+            if field is not None:
+                field.value = value
+                self._status_label[key].setText(field.formatter(value))
 
     def load_volume(self, dicom_dir: str) -> None:
         image = load_dicom_series(dicom_dir)
@@ -82,8 +93,17 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.renderer.AddVolume(self.volume)
         self.renderer.ResetCamera()
         self.update_transfer_functions()
+        # self.test_AddRGBPoint()
         self.vtk_widget.GetRenderWindow().Render()
-        self.update_status_label()
+        self.update_status()
+
+    def test_AddRGBPoint(self) -> None:
+        self.color_func.AddRGBPoint(0.0, 0.0, 0.0, 0.0)
+        self.color_func.AddRGBPoint(0.30, 0.5, 0.0, 0.0)
+        self.color_func.AddRGBPoint(0.70, 0.5, 0.3, 0.0)
+        self.color_func.AddRGBPoint(1.0, 1.0, 1.0, 0.8)
+
+        self.vtk_widget.GetRenderWindow().Render()
 
     def update_transfer_functions(self) -> None:
         if self.color_func is None or self.opacity_func is None:
@@ -109,14 +129,14 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.window_width += dx * self.window_width * 0.01
         if self.scalar_range is not None:
             max_width = self.scalar_range[1] - self.scalar_range[0]
-            self.window_width = max(1.0, min(max_width, self.window_width))
+            window_width = max(1.0, min(max_width, self.window_width))
 
         self.window_level += -dy * self.window_width * 0.01
         if self.scalar_range is not None:
-            self.window_level = max(self.scalar_range[0], min(self.scalar_range[1], self.window_level))
+            window_level = max(self.scalar_range[0], min(self.scalar_range[1], self.window_level))
 
         self.update_transfer_functions()
-        self.update_status_label()
+        self.update_status(window_width=window_width, window_level=window_level)
 
     def rotate_camera(self, dx: int, dy: int) -> None:
         camera = self.renderer.GetActiveCamera()
@@ -125,6 +145,27 @@ class VolumeViewer(QtWidgets.QMainWindow):
         camera.OrthogonalizeViewUp()
         self.renderer.ResetCameraClippingRange()
         self.vtk_widget.GetRenderWindow().Render()
+        azimuth, elevation = self.get_camera_angles(camera)
+        self.update_status(azimuth=azimuth, elevation=elevation)
+
+    def get_camera_angles(self, camera: vtk.vtkCamera):
+        # 1) 方向ベクトルを取得
+        pos = np.array(camera.GetPosition())
+        fp = np.array(camera.GetFocalPoint())
+        v = pos - fp  # カメラから注視点へのベクトル
+
+        # 2) ベクトル長
+        r = np.linalg.norm(v)
+        if r == 0:
+            return 0.0, 0.0
+
+        # 3) 仰角 (elevation): z 成分から
+        elevation = math.degrees(math.asin(v[2] / r))
+
+        # 4) 方位角 (azimuth): x–y 平面での角度
+        azimuth = math.degrees(math.atan2(v[1], v[0]))
+
+        return azimuth, elevation
 
     def eventFilter(self, obj: QtCore.QObject, event: QtCore.QEvent) -> bool:
         if obj is self.vtk_widget:
