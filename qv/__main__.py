@@ -52,6 +52,8 @@ class VolumeViewer(QtWidgets.QMainWindow):
             self.statusBar().addPermanentWidget(label)
             self._status_label[key] = label
 
+        self.delta_per_pixel = 1
+
         self.scalar_range: tuple[float, float] | None = None
         self.color_func: vtk.vtkColorTransferFunction | None = None
         self.opacity_func: vtk.vtkPiecewiseFunction | None = None
@@ -133,12 +135,12 @@ class VolumeViewer(QtWidgets.QMainWindow):
         if self.window_width is None or self.window_level is None:
             return
 
-        self.window_width += dx
+        self.window_width += dx * self.delta_per_pixel
         if self.scalar_range is not None:
             max_width = self.scalar_range[1] - self.scalar_range[0]
             self.window_width = max(1.0, min(max_width, self.window_width))
 
-        self.window_level += -dy
+        self.window_level += -dy * self.delta_per_pixel
         if self.scalar_range is not None:
             self.window_level = max(self.scalar_range[0], min(self.scalar_range[1], self.window_level))
 
@@ -242,6 +244,15 @@ class VolumeViewer(QtWidgets.QMainWindow):
     def window_level(self, value: float):
         self.status_fields["window_level"].value = value
         self._refresh_status_label("window_level")
+
+    @property
+    def delta_per_pixel(self) -> int:
+        return self.status_fields["delta_per_pixel"].value
+
+    @delta_per_pixel.setter
+    def delta_per_pixel(self, value: int):
+        self.status_fields["delta_per_pixel"].value = value
+        self._refresh_status_label("delta_per_pixel")
 
 
 def select_dicom_directory() -> str | None:

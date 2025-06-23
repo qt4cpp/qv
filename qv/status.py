@@ -63,6 +63,7 @@ def format_elevation(elevation: float) -> str:
 STATUS_FIELDS = {
     "window_level": StatusField(label="WL", fmt="{:.2f}"),
     "window_width": StatusField(label="WW", fmt="{:.2f}"),
+    "delta_per_pixel": StatusField(label="dp/px", fmt="{}"),
     "azimuth": StatusField(label="Azimuth", formatter=format_azimuth),
     "elevation": StatusField(label="Elevation", formatter=format_elevation),
 }
