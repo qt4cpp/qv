@@ -41,10 +41,11 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self._last_pos = QtCore.QPoint()
         self.rotation_factor = rotation_factor
 
+        # インスタンス毎にステータスを保持できるようにディープコピーをする。
         self.status_fields: dict[str, StatusField] = {
             k: copy.deepcopy(v) for k, v in STATUS_FIELDS.items()
         }
-
+        # ステータス毎にラベルを設定する
         self._status_label = {}
         for key, field in self.status_fields.items():
             label = QLabel("", self)
@@ -62,6 +63,8 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.interactor.Initialize()
 
     def update_status(self, **kwargs):
+        """Update the status fields with the given keyword arguments and
+         refresh the labels."""
         for key, value in kwargs.items():
             field = self.status_fields.get(key)
             if field is not None:
@@ -130,14 +133,14 @@ class VolumeViewer(QtWidgets.QMainWindow):
         if self.window_width is None or self.window_level is None:
             return
 
-        self.window_width += dx * self.window_width * 0.01
+        self.window_width += dx
         if self.scalar_range is not None:
             max_width = self.scalar_range[1] - self.scalar_range[0]
-            window_width = max(1.0, min(max_width, self.window_width))
+            self.window_width = max(1.0, min(max_width, self.window_width))
 
-        self.window_level += -dy * self.window_width * 0.01
+        self.window_level += -dy
         if self.scalar_range is not None:
-            window_level = max(self.scalar_range[0], min(self.scalar_range[1], self.window_level))
+            self.window_level = max(self.scalar_range[0], min(self.scalar_range[1], self.window_level))
 
         self.update_transfer_functions()
 
