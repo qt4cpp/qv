@@ -48,6 +48,9 @@ class VolumeViewer(QtWidgets.QMainWindow):
         # ステータス毎にラベルを設定する
         self._status_label = {}
         for key, field in self.status_fields.items():
+            if not field.visible:
+                self._status_label[key] = None
+                continue
             label = QLabel("", self)
             self.statusBar().addPermanentWidget(label)
             self._status_label[key] = label
@@ -74,14 +77,16 @@ class VolumeViewer(QtWidgets.QMainWindow):
 
     def _refresh_status_label(self, key: str) -> None:
         """Refresh the status label for the given key."""
+        if self._status_label[key] is None:
+            return
         value = self.status_fields[key].value
         self._status_label[key].setText(self.status_fields[key].formatter(value))
 
     def load_volume(self, dicom_dir: str) -> None:
         image = load_dicom_series(dicom_dir)
         self.scalar_range = image.GetScalarRange()
-        self.window_width = self.scalar_range[1] - self.scalar_range[0]
-        self.window_level = sum(self.scalar_range) / 2
+        self.window_width = round(self.scalar_range[1] - self.scalar_range[0])
+        self.window_level = round(sum(self.scalar_range) / 2)
         self.azimuth, self.elevation = self.get_camera_angles(self.renderer.GetActiveCamera())
 
         mapper = vtk.vtkGPUVolumeRayCastMapper()
@@ -123,6 +128,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
 
         self.color_func.RemoveAllPoints()
         self.color_func.AddRGBPoint(min_val, 0.0, 0.0, 0.0)
+        # self.color_func.AddRGBPoint(self.window_level, 1.0, 1.0, 1.0)
         self.color_func.AddRGBPoint(max_val, 1.0, 1.0, 1.0)
 
         self.opacity_func.RemoveAllPoints()
@@ -252,8 +258,6 @@ class VolumeViewer(QtWidgets.QMainWindow):
     @delta_per_pixel.setter
     def delta_per_pixel(self, value: int):
         self.status_fields["delta_per_pixel"].value = value
-        self._refresh_status_label("delta_per_pixel")
-
 
 def select_dicom_directory() -> str | None:
     dialog = QtWidgets.QFileDialog()
