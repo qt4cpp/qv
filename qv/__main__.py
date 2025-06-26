@@ -4,9 +4,11 @@ import os
 import sys
 
 import numpy as np
+import matplotlib.pyplot as plt
 from PySide6 import QtWidgets, QtCore
 from PySide6.QtWidgets import QLabel
 from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
+from vtkmodules.util.numpy_support import vtk_to_numpy
 import vtk
 
 from qv.status import STATUS_FIELDS, StatusField
@@ -17,6 +19,37 @@ def load_dicom_series(directory: str) -> vtk.vtkImageData:
     reader.SetDirectoryName(directory)
     reader.Update()
     return reader.GetOutput()
+
+def plot_intensity_histogram(image: vtk.vtkImageData):
+    data = vtk_to_numpy(image.GetPointData().GetScalars())
+    fig, ax = plt.subplots()
+    ax.hist(data, bins=1000)
+    ax.set_yscale("symlog", linthresh=1000)
+    # plt.hist(data, bins=100)
+    plt.ylim(top=100000000)
+    plt.xlim(right=4096, left=-2048)
+    ax.set_title("Intensity Histogram")
+    ax.set_xlabel("Intensity")
+    ax.set_ylabel("Count")
+    plt.show()
+
+    plot_hist_clip(data)
+
+
+def plot_hist_clip(volume, bins=100, lower_pct=25, upper_pct=99):
+    data = volume.flatten()
+    vmin, vmax = np.percentile(data, [lower_pct, upper_pct])
+    vmin = -1024
+    vmax = 4096
+    fig, ax = plt.subplots()
+    ax.hist(data, bins=bins, range=(vmin, vmax), edgecolor="black")
+    ax.set_xlim(vmin, vmax)
+    ax.set_xlabel("Signal Intensity ({}–{} pct)".format(lower_pct, upper_pct))
+    ax.set_yscale("log")
+    ax.set_ylabel("Count")
+    ax.set_title("Clipped Histogram")
+    plt.tight_layout()
+    plt.show()
 
 
 class VolumeViewer(QtWidgets.QMainWindow):
@@ -88,6 +121,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.window_width = round(self.scalar_range[1] - self.scalar_range[0])
         self.window_level = round(sum(self.scalar_range) / 2)
         self.azimuth, self.elevation = self.get_camera_angles(self.renderer.GetActiveCamera())
+        plot_intensity_histogram(image)
 
         mapper = vtk.vtkGPUVolumeRayCastMapper()
         mapper.SetInputData(image)
@@ -258,6 +292,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
     @delta_per_pixel.setter
     def delta_per_pixel(self, value: int):
         self.status_fields["delta_per_pixel"].value = value
+
 
 def select_dicom_directory() -> str | None:
     dialog = QtWidgets.QFileDialog()
