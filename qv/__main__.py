@@ -6,6 +6,7 @@ import sys
 import numpy as np
 import matplotlib.pyplot as plt
 from PySide6 import QtWidgets, QtCore
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QLabel
 from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 from vtkmodules.util.numpy_support import vtk_to_numpy
@@ -108,7 +109,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.window_level = round(sum(self.scalar_range) / 2)
         self.azimuth, self.elevation = self.get_camera_angles(self.renderer.GetActiveCamera())
         volume_array = vtk_to_numpy(image.GetPointData().GetScalars())
-        self.hist_window = show_histgram_window(volume_array, bins=2048)
+        self.hist_window = show_histgram_window(volume_array)
 
         mapper = vtk.vtkGPUVolumeRayCastMapper()
         mapper.SetInputData(image)
