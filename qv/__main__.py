@@ -11,6 +11,7 @@ from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 from vtkmodules.util.numpy_support import vtk_to_numpy
 import vtk
 
+from qv.histgram import show_histgram_window
 from qv.status import STATUS_FIELDS, StatusField
 
 
@@ -19,21 +20,6 @@ def load_dicom_series(directory: str) -> vtk.vtkImageData:
     reader.SetDirectoryName(directory)
     reader.Update()
     return reader.GetOutput()
-
-def plot_intensity_histogram(image: vtk.vtkImageData):
-    data = vtk_to_numpy(image.GetPointData().GetScalars())
-    fig, ax = plt.subplots()
-    ax.hist(data, bins=1000)
-    ax.set_yscale("symlog", linthresh=1000)
-    # plt.hist(data, bins=100)
-    plt.ylim(top=100000000)
-    plt.xlim(right=4096, left=-2048)
-    ax.set_title("Intensity Histogram")
-    ax.set_xlabel("Intensity")
-    ax.set_ylabel("Count")
-    plt.show()
-
-    plot_hist_clip(data)
 
 
 def plot_hist_clip(volume, bins=100, lower_pct=25, upper_pct=99):
@@ -121,7 +107,8 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.window_width = round(self.scalar_range[1] - self.scalar_range[0])
         self.window_level = round(sum(self.scalar_range) / 2)
         self.azimuth, self.elevation = self.get_camera_angles(self.renderer.GetActiveCamera())
-        plot_intensity_histogram(image)
+        volume_array = vtk_to_numpy(image.GetPointData().GetScalars())
+        self.hist_window = show_histgram_window(volume_array, bins=2048)
 
         mapper = vtk.vtkGPUVolumeRayCastMapper()
         mapper.SetInputData(image)
@@ -303,13 +290,22 @@ def select_dicom_directory() -> str | None:
 
 
 def main():
-    app = QtWidgets.QApplication(sys.argv)
+    # 既存の QApplication インスタンスを取得。なければ新規作成。
+    app = QtWidgets.QApplication.instance()
+    if app is None:
+        app = QtWidgets.QApplication(sys.argv)
+
+    # DICOM ディレクトリの取得
     dicom_dir = sys.argv[1] if len(sys.argv) > 1 else None
     if not dicom_dir:
         dicom_dir = select_dicom_directory()
         if dicom_dir is None:
             return
+
+    # ビューアーを起動
     viewer = VolumeViewer(dicom_dir)
+
+    # アプリケーションを実行（正常終了でプロセス終了）
     sys.exit(app.exec())
 
 
