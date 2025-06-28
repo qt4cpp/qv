@@ -83,8 +83,8 @@ class VolumeViewer(QtWidgets.QMainWindow):
     def load_volume(self, dicom_dir: str) -> None:
         image = vtk_helpers.load_dicom_series(dicom_dir)
         self.scalar_range = image.GetScalarRange()
-        self.window_width = round(self.scalar_range[1] - self.scalar_range[0])
-        self.window_level = round(sum(self.scalar_range) / 2)
+        self.window_level = round(min(4096.0, sum(self.scalar_range) / 2.0))
+        self.window_width = round(min(self.window_level / 2.0, 1024.0))
         self.azimuth, self.elevation = vtk_helpers.get_camera_angles(self.renderer.GetActiveCamera())
         volume_array = vtk_to_numpy(image.GetPointData().GetScalars())
         self.hist_window = show_histgram_window(volume_array)

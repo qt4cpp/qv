@@ -21,7 +21,6 @@ def select_dicom_directory() -> str | None:
     return None
 
 
-
 def plot_hist_clip(volume, bins=100, lower_pct=25, upper_pct=99):
     data = volume.flatten()
     vmin, vmax = np.percentile(data, [lower_pct, upper_pct])
@@ -36,7 +35,6 @@ def plot_hist_clip(volume, bins=100, lower_pct=25, upper_pct=99):
     ax.set_title("Clipped Histogram")
     plt.tight_layout()
     plt.show()
-
 
 
 def get_camera_angles(camera: vtk.vtkCamera):
