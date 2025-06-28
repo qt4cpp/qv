@@ -14,29 +14,7 @@ import vtk
 
 from qv.histgram import show_histgram_window
 from qv.status import STATUS_FIELDS, StatusField
-
-
-def load_dicom_series(directory: str) -> vtk.vtkImageData:
-    reader = vtk.vtkDICOMImageReader()
-    reader.SetDirectoryName(directory)
-    reader.Update()
-    return reader.GetOutput()
-
-
-def plot_hist_clip(volume, bins=100, lower_pct=25, upper_pct=99):
-    data = volume.flatten()
-    vmin, vmax = np.percentile(data, [lower_pct, upper_pct])
-    vmin = -1024
-    vmax = 4096
-    fig, ax = plt.subplots()
-    ax.hist(data, bins=bins, range=(vmin, vmax), edgecolor="black")
-    ax.set_xlim(vmin, vmax)
-    ax.set_xlabel("Signal Intensity ({}–{} pct)".format(lower_pct, upper_pct))
-    ax.set_yscale("log")
-    ax.set_ylabel("Count")
-    ax.set_title("Clipped Histogram")
-    plt.tight_layout()
-    plt.show()
+import qv.utils.vtk_helpers as vtk_helpers
 
 
 class VolumeViewer(QtWidgets.QMainWindow):
@@ -103,11 +81,11 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self._status_label[key].setText(self.status_fields[key].formatter(value))
 
     def load_volume(self, dicom_dir: str) -> None:
-        image = load_dicom_series(dicom_dir)
+        image = vtk_helpers.load_dicom_series(dicom_dir)
         self.scalar_range = image.GetScalarRange()
         self.window_width = round(self.scalar_range[1] - self.scalar_range[0])
         self.window_level = round(sum(self.scalar_range) / 2)
-        self.azimuth, self.elevation = self.get_camera_angles(self.renderer.GetActiveCamera())
+        self.azimuth, self.elevation = vtk_helpers.get_camera_angles(self.renderer.GetActiveCamera())
         volume_array = vtk_to_numpy(image.GetPointData().GetScalars())
         self.hist_window = show_histgram_window(volume_array)
 
@@ -181,26 +159,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
         camera.OrthogonalizeViewUp()
         self.renderer.ResetCameraClippingRange()
         self.vtk_widget.GetRenderWindow().Render()
-        self.azimuth, self.elevation = self.get_camera_angles(camera)
-
-    def get_camera_angles(self, camera: vtk.vtkCamera):
-        # 1) 方向ベクトルを取得
-        pos = np.array(camera.GetPosition())
-        fp = np.array(camera.GetFocalPoint())
-        v = pos - fp  # カメラから注視点へのベクトル
-
-        # 2) ベクトル長
-        r = np.linalg.norm(v)
-        if r == 0:
-            return 0.0, 0.0
-
-        # 3) 仰角 (elevation): z 成分から
-        elevation = math.degrees(math.asin(v[2] / r))
-
-        # 4) 方位角 (azimuth): x–y 平面での角度
-        azimuth = math.degrees(math.atan2(v[1], v[0]))
-
-        return azimuth, elevation
+        self.azimuth, self.elevation = vtk_helpers.get_camera_angles(camera)
 
     def eventFilter(self, obj: QtCore.QObject, event: QtCore.QEvent) -> bool:
         if obj is self.vtk_widget:
@@ -282,14 +241,6 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.status_fields["delta_per_pixel"].value = value
 
 
-def select_dicom_directory() -> str | None:
-    dialog = QtWidgets.QFileDialog()
-    dialog.setFileMode(QtWidgets.QFileDialog.Directory)
-    if dialog.exec():
-        return dialog.selectedFiles()[0]
-    return None
-
-
 def main():
     # 既存の QApplication インスタンスを取得。なければ新規作成。
     app = QtWidgets.QApplication.instance()
@@ -299,7 +250,7 @@ def main():
     # DICOM ディレクトリの取得
     dicom_dir = sys.argv[1] if len(sys.argv) > 1 else None
     if not dicom_dir:
-        dicom_dir = select_dicom_directory()
+        dicom_dir = vtk_helpers.select_dicom_directory()
         if dicom_dir is None:
             return
 
