@@ -116,6 +116,9 @@ class VolumeViewer(QtWidgets.QMainWindow):
         # self.test_AddRGBPoint()
         self.vtk_widget.GetRenderWindow().Render()
 
+        self.hist_window.set_viewing_range(self.window_level-self.window_width / 2,
+                                           self.window_level+self.window_width / 2)
+
     def test_AddRGBPoint(self) -> None:
         self.color_func.AddRGBPoint(0, 0.0, 0.0, 0.0)
         self.color_func.AddRGBPoint(500, 1.0, 0.5, 0.3)

@@ -8,6 +8,12 @@ class HistogramPlotWidget(pg.PlotWidget):
     """Display a histogram of the given data."""
     def __init__(self, parent=None, data: np.ndarray = None):
         super().__init__(parent)
+        self.xmin: int = -2048
+        self.xmax: int = 4096
+        self.ymin: int = 0
+        self.ymax: int = 1000000
+        self.setXRange(min=self.xmin, max=self.xmax, padding=0)
+        self.setYRange(min=0, max=1000000, padding=0)
 
         if data is not None:
             self.set_data(data)
@@ -21,6 +27,11 @@ class HistogramPlotWidget(pg.PlotWidget):
             pen=pg.mkPen(color=(255, 255, 255), width=1),
             symbol=None,
         )
+
+    def set_viewing_range(self, left: int, right: int):
+        rgn = pg.LinearRegionItem([left, right])
+        self.addItem(rgn)
+        # rgn.sigRegionChanged.connect(self.update_viewing_range)
 
 
 def show_histgram_window(data: np.ndarray, bins: int = 1024):
