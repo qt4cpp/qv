@@ -1,7 +1,26 @@
 import numpy as np
 import vtk
-from PySide6.QtWidgets import QWidget, QVBoxLayout
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QDockWidget
 import pyqtgraph as pg
+
+
+class HistogramPlotWidget(pg.PlotWidget):
+    """Display a histogram of the given data."""
+    def __init__(self, parent=None, data: np.ndarray = None):
+        super().__init__(parent)
+
+        if data is not None:
+            self.set_data(data)
+
+    def set_data(self, data: np.ndarray, bins: int = 1024):
+        counts, edges = np.histogram(data.flatten(), bins=bins)
+        centers = edges[:-1] + edges[1:] / 2
+        self.plot(
+            x=centers,
+            y=counts,
+            pen=pg.mkPen(color=(255, 255, 255), width=1),
+            symbol=None,
+        )
 
 
 def show_histgram_window(data: np.ndarray, bins: int = 1024):

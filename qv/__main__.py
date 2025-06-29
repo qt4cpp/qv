@@ -7,12 +7,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 from PySide6 import QtWidgets, QtCore
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QLabel
+from PySide6.QtWidgets import QLabel, QSplitter
 from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 from vtkmodules.util.numpy_support import vtk_to_numpy
 import vtk
 
-from qv.histgram import show_histgram_window
+from qv.histgram import show_histgram_window, HistogramPlotWidget
 from qv.status import STATUS_FIELDS, StatusField
 import qv.utils.vtk_helpers as vtk_helpers
 
@@ -23,9 +23,13 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.setWindowTitle("qv - DICOM Volume Viewer")
 
         self.frame = QtWidgets.QFrame()
-        self.vl = QtWidgets.QVBoxLayout()
+        self.splitter = QSplitter(Qt.Vertical)
         self.vtk_widget = QVTKRenderWindowInteractor(self.frame)
-        self.vl.addWidget(self.vtk_widget)
+        self.splitter.addWidget(self.vtk_widget)
+        self.hist_window = HistogramPlotWidget()
+        self.splitter.addWidget(self.hist_window)
+        self.vl = QtWidgets.QVBoxLayout()
+        self.vl.addWidget(self.splitter)
         self.frame.setLayout(self.vl)
         self.setCentralWidget(self.frame)
 
@@ -87,7 +91,8 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.window_width = round(min(self.window_level / 2.0, 1024.0))
         self.azimuth, self.elevation = vtk_helpers.get_camera_angles(self.renderer.GetActiveCamera())
         volume_array = vtk_to_numpy(image.GetPointData().GetScalars())
-        self.hist_window = show_histgram_window(volume_array)
+        # self.hist_window = show_histgram_window(volume_array)
+        self.hist_window.set_data(volume_array)
 
         mapper = vtk.vtkGPUVolumeRayCastMapper()
         mapper.SetInputData(image)
