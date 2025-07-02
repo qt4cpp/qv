@@ -116,8 +116,9 @@ class VolumeViewer(QtWidgets.QMainWindow):
         # self.test_AddRGBPoint()
         self.vtk_widget.GetRenderWindow().Render()
 
-        self.hist_window.set_viewing_range(self.window_level-self.window_width / 2,
-                                           self.window_level+self.window_width / 2)
+        # self.hist_window.set_viewing_range(self.window_level-self.window_width / 2,
+        #                                    self.window_level+self.window_width / 2)
+        self.hist_window.update_viewing_graph(self.volume_property.GetScalarOpacity())
 
     def test_AddRGBPoint(self) -> None:
         self.color_func.AddRGBPoint(0, 0.0, 0.0, 0.0)
@@ -144,6 +145,13 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.opacity_func.AddPoint(max_val, 1.0)
 
         self.vtk_widget.GetRenderWindow().Render()
+
+    def update_histgram_window(self) -> None:
+        if self.hist_window is None:
+            return
+
+        pwf = self.volume_property.GetScalarOpacity()
+        self.hist_window.update_viewing_graph(pwf)
 
     def adjust_window_level(self, dx: int, dy: int) -> None:
         if self.window_width is None or self.window_level is None:

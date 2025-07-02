@@ -2,6 +2,7 @@ import numpy as np
 import vtk
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QDockWidget
 import pyqtgraph as pg
+from pyqtgraph import ViewBox
 
 
 class HistogramPlotWidget(pg.PlotWidget):
@@ -11,9 +12,19 @@ class HistogramPlotWidget(pg.PlotWidget):
         self.xmin: int = -2048
         self.xmax: int = 4096
         self.ymin: int = 0
-        self.ymax: int = 1000000
+        self.ymax: int = 100000
         self.setXRange(min=self.xmin, max=self.xmax, padding=0)
-        self.setYRange(min=0, max=1000000, padding=0)
+        self.setYRange(min=self.ymin, max=self.ymax, padding=0)
+
+        self.plot_item = self.getPlotItem()
+        self.plot_item.showAxis("right")
+        self.vb2 = ViewBox()
+        self.plot_item.scene().addItem(self.vb2)
+        self.plot_item.getAxis("right").linkToView(self.vb2)
+        self.vb2.setXLink(self.plot_item)
+
+        self.plot_item.getViewBox().sigResized.connect(self.update_view)
+        self.update_view()
 
         if data is not None:
             self.set_data(data)
@@ -29,9 +40,24 @@ class HistogramPlotWidget(pg.PlotWidget):
         )
 
     def set_viewing_range(self, left: int, right: int):
-        rgn = pg.LinearRegionItem([left, right])
-        self.addItem(rgn)
-        # rgn.sigRegionChanged.connect(self.update_viewing_range)
+        pass
+
+    def update_viewing_graph(self, pwf):
+        xs, ys = sample_opacity(pwf)
+        opacity_curve = pg.PlotDataItem(x=xs, y=ys, pen=pg.mkPen(color=(255, 255, 60), width=1))
+        self.vb2.addItem(opacity_curve)
+        self.plot_item.getAxis("right").setLabel("Opacity (0-1)")
+
+    def update_view(self):
+        self.vb2.setGeometry(self.plot_item.getViewBox().sceneBoundingRect())
+        self.vb2.linkedViewChanged(self.plot_item.getViewBox(), self.vb2.XAxis)
+
+
+def sample_opacity(pwf, n_samples=256, scalar_range=(-2048, 4096)):
+    """Sample the opacity function at a regular grid of points."""
+    x = np.linspace(scalar_range[0], scalar_range[1], n_samples)
+    y = np.array([pwf.GetValue(x) for x in x])
+    return x, y
 
 
 def show_histgram_window(data: np.ndarray, bins: int = 1024):
