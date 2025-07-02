@@ -167,6 +167,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
             self.window_level = max(self.scalar_range[0], min(self.scalar_range[1], self.window_level))
 
         self.update_transfer_functions()
+        self.update_histgram_window()
 
     def rotate_camera(self, dx: int, dy: int) -> None:
         camera = self.renderer.GetActiveCamera()

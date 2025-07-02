@@ -21,6 +21,7 @@ class HistogramPlotWidget(pg.PlotWidget):
         self.vb2 = ViewBox()
         self.plot_item.scene().addItem(self.vb2)
         self.plot_item.getAxis("right").linkToView(self.vb2)
+        self.plot_item.getAxis("right").setLabel("Opacity (0-1)")
         self.vb2.setXLink(self.plot_item)
 
         self.plot_item.getViewBox().sigResized.connect(self.update_view)
@@ -29,7 +30,7 @@ class HistogramPlotWidget(pg.PlotWidget):
         if data is not None:
             self.set_data(data)
 
-    def set_data(self, data: np.ndarray, bins: int = 1024):
+    def set_data(self, data: np.ndarray, bins: int = 2048):
         counts, edges = np.histogram(data.flatten(), bins=bins)
         centers = edges[:-1] + edges[1:] / 2
         self.plot(
@@ -43,10 +44,10 @@ class HistogramPlotWidget(pg.PlotWidget):
         pass
 
     def update_viewing_graph(self, pwf):
+        self.vb2.clear()
         xs, ys = sample_opacity(pwf)
         opacity_curve = pg.PlotDataItem(x=xs, y=ys, pen=pg.mkPen(color=(255, 255, 60), width=1))
         self.vb2.addItem(opacity_curve)
-        self.plot_item.getAxis("right").setLabel("Opacity (0-1)")
 
     def update_view(self):
         self.vb2.setGeometry(self.plot_item.getViewBox().sceneBoundingRect())
