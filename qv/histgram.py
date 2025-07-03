@@ -10,15 +10,16 @@ class HistogramPlotWidget(pg.PlotWidget):
     def __init__(self, parent=None, data: np.ndarray = None):
         super().__init__(parent)
         self.xmin: int = -2048
-        self.xmax: int = 4096
+        self.xmax: int = 8192
         self.ymin: int = 0
-        self.ymax: int = 1000000
-        self.setXRange(min=self.xmin, max=self.xmax, padding=0)
-        self.setYRange(min=self.ymin, max=self.ymax, padding=0)
+        self.ymax: int = 100000000
+        self.getViewBox().setLimits(xMin=self.xmin, xMax=self.xmax, yMin=self.ymin, yMax=self.ymax)
+        # self.setYRange(min=self.ymin, max=self.ymax, padding=0)
 
         self.plot_item = self.getPlotItem()
         self.plot_item.showAxis("right")
         self.vb2 = ViewBox()
+        self.vb2.setLimits(yMin=0, yMax=1.2)
         self.plot_item.scene().addItem(self.vb2)
         self.plot_item.getAxis("right").linkToView(self.vb2)
         self.plot_item.getAxis("right").setLabel("Opacity (0-1)")
@@ -57,7 +58,7 @@ class HistogramPlotWidget(pg.PlotWidget):
         self.vb2.linkedViewChanged(self.plot_item.getViewBox(), self.vb2.XAxis)
 
 
-def sample_opacity(pwf, n_samples=256, scalar_range=(-2048, 4096)):
+def sample_opacity(pwf, n_samples=256, scalar_range=(-2048, 8192)):
     """Sample the opacity function at a regular grid of points."""
     x = np.linspace(scalar_range[0], scalar_range[1], n_samples)
     y = np.array([pwf.GetValue(x) for x in x])
