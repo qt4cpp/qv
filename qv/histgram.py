@@ -12,7 +12,7 @@ class HistogramPlotWidget(pg.PlotWidget):
         self.xmin: int = -2048
         self.xmax: int = 4096
         self.ymin: int = 0
-        self.ymax: int = 100000
+        self.ymax: int = 1000000
         self.setXRange(min=self.xmin, max=self.xmax, padding=0)
         self.setYRange(min=self.ymin, max=self.ymax, padding=0)
 
@@ -30,8 +30,11 @@ class HistogramPlotWidget(pg.PlotWidget):
         if data is not None:
             self.set_data(data)
 
-    def set_data(self, data: np.ndarray, bins: int = 2048):
-        counts, edges = np.histogram(data.flatten(), bins=bins)
+    def set_data(self, data: np.ndarray, bins: int = 200):
+        flat = data.flatten()
+        counts, edges = np.histogram(flat, bins=bins)
+        _, y_hi = np.percentile(counts, [0, 98])
+        self.setYRange(min=0, max=y_hi)
         centers = edges[:-1] + edges[1:] / 2
         self.plot(
             x=centers,
