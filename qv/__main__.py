@@ -12,32 +12,26 @@ from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 from vtkmodules.util.numpy_support import vtk_to_numpy
 import vtk
 
-from qv.histgram import show_histgram_window, HistogramPlotWidget
+from qv.histgram import show_histgram_window, HistogramWidget
 from qv.status import STATUS_FIELDS, StatusField
 import qv.utils.vtk_helpers as vtk_helpers
+from ui_mainwindow import Ui_MainWindow
 
 
 class VolumeViewer(QtWidgets.QMainWindow):
+    statusChanged = QtCore.Signal(str, str)
+
     def __init__(self, dicom_dir: str | None = None, rotation_factor: float = 0.5) -> None:
         super().__init__()
-        self.setWindowTitle("qv - DICOM Volume Viewer")
+        self.ui = Ui_MainWindow()
+        self.ui.setupUi(self)
 
-        self.frame = QtWidgets.QFrame()
-        self.splitter = QSplitter(Qt.Vertical)
-        self.vtk_widget = QVTKRenderWindowInteractor(self.frame)
-        self.splitter.addWidget(self.vtk_widget)
-        self.hist_window = HistogramPlotWidget()
-        self.splitter.addWidget(self.hist_window)
-        self.vl = QtWidgets.QVBoxLayout()
-        self.vl.addWidget(self.splitter)
-        self.frame.setLayout(self.vl)
-        self.setCentralWidget(self.frame)
-
+        w = self.ui.vtk_widget
+        w.installEventFilter(self)
         self.renderer = vtk.vtkRenderer()
-        self.vtk_widget.GetRenderWindow().AddRenderer(self.renderer)
-        self.interactor = self.vtk_widget.GetRenderWindow().GetInteractor()
+        w.GetRenderWindow().AddRenderer(self.renderer)
+        self.interactor = w.GetRenderWindow().GetInteractor()
 
-        self.vtk_widget.installEventFilter(self)
         self._right_dragging = False
         self._left_dragging = False
         self._last_pos = QtCore.QPoint()
@@ -47,15 +41,8 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.status_fields: dict[str, StatusField] = {
             k: copy.deepcopy(v) for k, v in STATUS_FIELDS.items()
         }
-        # ステータス毎にラベルを設定する
-        self._status_label = {}
-        for key, field in self.status_fields.items():
-            if not field.visible:
-                self._status_label[key] = None
-                continue
-            label = QLabel("", self)
-            self.statusBar().addPermanentWidget(label)
-            self._status_label[key] = label
+        self.ui.setup_status(self, **self.status_fields)
+        self.statusChanged.connect(self.ui._refresh_status_label)
 
         self.delta_per_pixel = 1
 
@@ -77,13 +64,6 @@ class VolumeViewer(QtWidgets.QMainWindow):
             if field is not None:
                 self.status_fields[key].value = value
 
-    def _refresh_status_label(self, key: str) -> None:
-        """Refresh the status label for the given key."""
-        if self._status_label[key] is None:
-            return
-        value = self.status_fields[key].value
-        self._status_label[key].setText(self.status_fields[key].formatter(value))
-
     def load_volume(self, dicom_dir: str) -> None:
         image = vtk_helpers.load_dicom_series(dicom_dir)
         self.scalar_range = image.GetScalarRange()
@@ -91,8 +71,8 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.window_width = round(min(self.window_level / 2.0, 1024.0))
         self.azimuth, self.elevation = vtk_helpers.get_camera_angles(self.renderer.GetActiveCamera())
         volume_array = vtk_to_numpy(image.GetPointData().GetScalars())
-        # self.hist_window = show_histgram_window(volume_array)
-        self.hist_window.set_data(volume_array)
+        # self.ui.histgram_widget = show_histgram_window(volume_array)
+        self.ui.histgram_widget.set_data(volume_array)
 
         mapper = vtk.vtkGPUVolumeRayCastMapper()
         mapper.SetInputData(image)
@@ -114,11 +94,11 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.renderer.ResetCamera()
         self.update_transfer_functions()
         # self.test_AddRGBPoint()
-        self.vtk_widget.GetRenderWindow().Render()
+        self.ui.vtk_widget.GetRenderWindow().Render()
 
-        # self.hist_window.set_viewing_range(self.window_level-self.window_width / 2,
+        # self.ui.histgram_widget.set_viewing_range(self.window_level-self.window_width / 2,
         #                                    self.window_level+self.window_width / 2)
-        self.hist_window.update_viewing_graph(self.volume_property.GetScalarOpacity())
+        self.ui.histgram_widget.update_viewing_graph(self.volume_property.GetScalarOpacity())
 
     def test_AddRGBPoint(self) -> None:
         self.color_func.AddRGBPoint(0, 0.0, 0.0, 0.0)
@@ -126,7 +106,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.color_func.AddRGBPoint(1200, 1.0, 0.5, 0.3)
         self.color_func.AddRGBPoint(1350, 1.0, 1.0, 0.9)
 
-        self.vtk_widget.GetRenderWindow().Render()
+        self.ui.vtk_widget.GetRenderWindow().Render()
 
     def update_transfer_functions(self) -> None:
         if self.color_func is None or self.opacity_func is None:
@@ -144,14 +124,14 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.opacity_func.AddPoint(min_val, 0.0)
         self.opacity_func.AddPoint(max_val, 1.0)
 
-        self.vtk_widget.GetRenderWindow().Render()
+        self.ui.vtk_widget.GetRenderWindow().Render()
 
     def update_histgram_window(self) -> None:
-        if self.hist_window is None:
+        if self.ui.histgram_widget is None:
             return
 
         pwf = self.volume_property.GetScalarOpacity()
-        self.hist_window.update_viewing_graph(pwf)
+        self.ui.histgram_widget.update_viewing_graph(pwf)
 
     def adjust_window_level(self, dx: int, dy: int) -> None:
         if self.window_width is None or self.window_level is None:
@@ -175,11 +155,11 @@ class VolumeViewer(QtWidgets.QMainWindow):
         camera.Elevation((dy * self.rotation_factor))
         camera.OrthogonalizeViewUp()
         self.renderer.ResetCameraClippingRange()
-        self.vtk_widget.GetRenderWindow().Render()
+        self.ui.vtk_widget.GetRenderWindow().Render()
         self.azimuth, self.elevation = vtk_helpers.get_camera_angles(camera)
 
     def eventFilter(self, obj: QtCore.QObject, event: QtCore.QEvent) -> bool:
-        if obj is self.vtk_widget:
+        if obj is self.ui.vtk_widget:
             if event.type() == QtCore.QEvent.MouseButtonPress:
                 if event.button() == QtCore.Qt.RightButton:
                     self._right_dragging = True
@@ -220,7 +200,8 @@ class VolumeViewer(QtWidgets.QMainWindow):
     @azimuth.setter
     def azimuth(self, value: float):
         self.status_fields["azimuth"].value = value
-        self._refresh_status_label("azimuth")
+        text = self.status_fields["azimuth"].formatter(value)
+        self.statusChanged.emit("azimuth", text)
 
     @property
     def elevation(self) -> float:
@@ -229,7 +210,8 @@ class VolumeViewer(QtWidgets.QMainWindow):
     @elevation.setter
     def elevation(self, value: float):
         self.status_fields["elevation"].value = value
-        self._refresh_status_label("elevation")
+        text = self.status_fields["elevation"].formatter(value)
+        self.statusChanged.emit("elevation", text)
 
     @property
     def window_width(self) -> float:
@@ -238,7 +220,8 @@ class VolumeViewer(QtWidgets.QMainWindow):
     @window_width.setter
     def window_width(self, value: float):
         self.status_fields["window_width"].value = value
-        self._refresh_status_label("window_width")
+        text = self.status_fields["window_width"].formatter(value)
+        self.statusChanged.emit("window_width", text)
 
     @property
     def window_level(self) -> float:
@@ -247,7 +230,8 @@ class VolumeViewer(QtWidgets.QMainWindow):
     @window_level.setter
     def window_level(self, value: float):
         self.status_fields["window_level"].value = value
-        self._refresh_status_label("window_level")
+        text = self.status_fields["window_level"].formatter(value)
+        self.statusChanged.emit("window_level", text)
 
     @property
     def delta_per_pixel(self) -> int:

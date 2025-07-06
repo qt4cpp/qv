@@ -5,7 +5,7 @@ import pyqtgraph as pg
 from pyqtgraph import ViewBox
 
 
-class HistogramPlotWidget(pg.PlotWidget):
+class HistogramWidget(pg.PlotWidget):
     """Display a histogram of the given data."""
     def __init__(self, parent=None, data: np.ndarray = None):
         super().__init__(parent)
