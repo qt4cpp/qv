@@ -1,11 +1,9 @@
-import vtk
 from PySide6 import QtCore
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMainWindow, QWidget, QSplitter, QHBoxLayout, QLabel
+from PySide6.QtWidgets import QMainWindow, QWidget, QSplitter, QHBoxLayout, QLabel, QSizePolicy
 from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 
 from histgram import HistogramWidget
-from status import StatusField
 
 
 class Ui_MainWindow:
@@ -15,11 +13,14 @@ class Ui_MainWindow:
         self.vtk_widget = QVTKRenderWindowInteractor(central_widget)
         self.histgram_widget = HistogramWidget()
         self._status_label = {}
-        # self.histgram_widget.setFixedHeight(200)
+        self.histgram_widget.setMinimumHeight(100)
+        self.histgram_widget.sizePolicy().setVerticalStretch(0)
 
         splitter = QSplitter(Qt.Vertical)
         splitter.addWidget(self.vtk_widget)
         splitter.addWidget(self.histgram_widget)
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 1)
         layout = QHBoxLayout(central_widget)
         layout.addWidget(splitter)
         window.setLayout(layout)
