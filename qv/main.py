@@ -1,20 +1,12 @@
 import copy
-import math
-import os
 import sys
 
-import numpy as np
-import matplotlib.pyplot as plt
-from PySide6 import QtWidgets, QtCore
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QLabel, QSplitter
-from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
-from vtkmodules.util.numpy_support import vtk_to_numpy
 import vtk
+from PySide6 import QtWidgets, QtCore
+from vtkmodules.util.numpy_support import vtk_to_numpy
 
-from qv.histgram import show_histgram_window, HistogramWidget
-from qv.status import STATUS_FIELDS, StatusField
 import qv.utils.vtk_helpers as vtk_helpers
+from qv.status import STATUS_FIELDS, StatusField
 from ui_mainwindow import Ui_MainWindow
 
 

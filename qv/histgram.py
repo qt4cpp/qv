@@ -1,7 +1,6 @@
 import numpy as np
-import vtk
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QDockWidget
 import pyqtgraph as pg
+from PySide6.QtWidgets import QWidget, QVBoxLayout
 from pyqtgraph import ViewBox
 
 

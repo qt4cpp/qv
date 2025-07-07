@@ -1,9 +1,8 @@
 from PySide6 import QtCore
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMainWindow, QWidget, QSplitter, QHBoxLayout, QLabel, QSizePolicy
+from PySide6.QtWidgets import QMainWindow, QWidget, QSplitter, QHBoxLayout, QLabel
 from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 
-import vtk_helpers
 from histgram import HistogramWidget
 
 
