@@ -3,6 +3,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QMainWindow, QWidget, QSplitter, QHBoxLayout, QLabel, QSizePolicy
 from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 
+import vtk_helpers
 from histgram import HistogramWidget
 
 
@@ -26,6 +27,15 @@ class Ui_MainWindow:
         window.setLayout(layout)
 
         window.setCentralWidget(central_widget)
+
+        self.create_menus(window)
+
+    def create_menus(self, window: QMainWindow):
+        file_menu = window.menuBar().addMenu("&File")
+
+        file_menu.addAction("&Open", window.open_menu)
+        file_menu.addAction("&Quit", window.close)
+
 
     def setup_status(self, window: QMainWindow, **kwargs):
         status_bar = window.statusBar()

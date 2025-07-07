@@ -64,6 +64,12 @@ class VolumeViewer(QtWidgets.QMainWindow):
             if field is not None:
                 self.status_fields[key].value = value
 
+    def open_menu(self):
+        dicom_dir = vtk_helpers.select_dicom_directory()
+        if dicom_dir is None:
+            return
+        self.load_volume(dicom_dir)
+
     def load_volume(self, dicom_dir: str) -> None:
         image = vtk_helpers.load_dicom_series(dicom_dir)
         self.scalar_range = image.GetScalarRange()
@@ -249,14 +255,15 @@ def main():
         app = QtWidgets.QApplication(sys.argv)
 
     # DICOM ディレクトリの取得
-    dicom_dir = sys.argv[1] if len(sys.argv) > 1 else None
-    if not dicom_dir:
-        dicom_dir = vtk_helpers.select_dicom_directory()
-        if dicom_dir is None:
-            return
+    # dicom_dir = sys.argv[1] if len(sys.argv) > 1 else None
+    # if not dicom_dir:
+    #     dicom_dir = vtk_helpers.select_dicom_directory()
+    #     if dicom_dir is None:
+    #         return
 
     # ビューアーを起動
-    viewer = VolumeViewer(dicom_dir)
+    # viewer = VolumeViewer(dicom_dir)
+    viewer = VolumeViewer()
 
     # アプリケーションを実行（正常終了でプロセス終了）
     sys.exit(app.exec())
