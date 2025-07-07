@@ -38,6 +38,8 @@ class VolumeViewer(QtWidgets.QMainWindow):
 
         self.delta_per_pixel = 1
 
+        self.volume: vtk.vtkVolume | None = None
+        self.volume_property: vtk.vtkVolumeProperty | None = None
         self.scalar_range: tuple[float, float] | None = None
         self.color_func: vtk.vtkColorTransferFunction | None = None
         self.opacity_func: vtk.vtkPiecewiseFunction | None = None
