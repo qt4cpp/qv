@@ -40,7 +40,6 @@ def format_azimuth(azimuth: float) -> str:
     + -> RAO
     """
     az = azimuth - 90
-    print(az)
     if -180 <= az <= 0:
         return f"LAO {abs(az):.2f}"
     elif -270 <= az < -180:
