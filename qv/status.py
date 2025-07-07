@@ -36,14 +36,17 @@ class StatusField:
 def format_azimuth(azimuth: float) -> str:
     """
     Format the azimuth angle on vtk in degrees.
-    + -> LAO
-    - -> RAO
+    - -> LAO
+    + -> RAO
     """
-    angle = abs(azimuth)
-    if azimuth >= 0:
-        return f"LAO {angle:.2f}"
+    az = azimuth - 90
+    print(az)
+    if -180 <= az <= 0:
+        return f"LAO {abs(az):.2f}"
+    elif -270 <= az < -180:
+        return f"RAO {360+az:.2f}"
     else:
-        return f"RAO {angle:.2f}"
+        return f"RAO {abs(az):.2f}"
 
 
 def format_elevation(elevation: float) -> str:
