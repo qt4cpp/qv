@@ -55,3 +55,8 @@ def get_camera_angles(camera: vtk.vtkCamera):
     azimuth = math.degrees(math.atan2(v[1], v[0]))
 
     return azimuth, elevation
+
+
+def return_dicom_dir():
+    dicom_dir = "../dicom/HF_head/"
+    return dicom_dir

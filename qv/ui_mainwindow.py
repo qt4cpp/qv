@@ -31,9 +31,12 @@ class Ui_MainWindow:
 
     def create_menus(self, window: QMainWindow):
         file_menu = window.menuBar().addMenu("&File")
+        view_menu = window.menuBar().addMenu("&View")
 
         file_menu.addAction("&Open", window.open_menu)
         file_menu.addAction("&Quit", window.close)
+
+        view_menu.addAction("&Reset View", None)
 
 
     def setup_status(self, window: QMainWindow, **kwargs):

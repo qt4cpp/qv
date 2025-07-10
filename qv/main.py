@@ -8,6 +8,7 @@ from vtkmodules.util.numpy_support import vtk_to_numpy
 import qv.utils.vtk_helpers as vtk_helpers
 from qv.status import STATUS_FIELDS, StatusField
 from ui_mainwindow import Ui_MainWindow
+from vtk_helpers import return_dicom_dir
 
 
 class VolumeViewer(QtWidgets.QMainWindow):
@@ -91,6 +92,13 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.volume.SetProperty(self.volume_property)
 
         self.renderer.AddVolume(self.volume)
+        camera = vtk.vtkCamera()
+        camera.SetClippingRange(0.001, 100)
+        camera.SetFocalPoint(0, 0, 0)
+        # camera.SetPosition(0, 0, 0)
+        camera.SetViewUp(2, 1, 0)
+        self.renderer.SetActiveCamera(camera)
+
         self.renderer.ResetCamera()
         self.update_transfer_functions()
         # self.test_AddRGBPoint()
@@ -157,6 +165,9 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.renderer.ResetCameraClippingRange()
         self.ui.vtk_widget.GetRenderWindow().Render()
         self.azimuth, self.elevation = vtk_helpers.get_camera_angles(camera)
+
+    def adjust_camera(self):
+        pass
 
     def eventFilter(self, obj: QtCore.QObject, event: QtCore.QEvent) -> bool:
         if obj is self.ui.vtk_widget:
@@ -257,7 +268,7 @@ def main():
 
     # ビューアーを起動
     # viewer = VolumeViewer(dicom_dir)
-    viewer = VolumeViewer()
+    viewer = VolumeViewer(return_dicom_dir())
 
     # アプリケーションを実行（正常終了でプロセス終了）
     sys.exit(app.exec())
