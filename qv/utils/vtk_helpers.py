@@ -4,6 +4,7 @@ import vtk
 import numpy as np
 from PySide6 import QtWidgets
 from matplotlib import pyplot as plt
+import vtkmodules.vtkDICOM
 
 
 def load_dicom_series(directory: str) -> vtk.vtkImageData:

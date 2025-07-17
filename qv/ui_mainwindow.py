@@ -36,7 +36,10 @@ class Ui_MainWindow:
         file_menu.addAction("&Open", window.open_menu)
         file_menu.addAction("&Quit", window.close)
 
-        view_menu.addAction("&Reset View", None)
+        view_menu.addAction("&Reset View", window.reset_camera)
+        view_menu.addAction("Front view", window.front_view)
+        view_menu.addAction("Reset Zoom", window.reset_zoom)
+        view_menu.addAction("2x zoom", window.set_zoom_2x)
 
 
     def setup_status(self, window: QMainWindow, **kwargs):
