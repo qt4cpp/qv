@@ -213,8 +213,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
         camera = self.renderer.GetActiveCamera()
         fp = camera.GetFocalPoint()
         pos = camera.GetPosition()
-        dir_vec = [pos[i] - fp[i] for i in range(3)]
-        distance = math.sqrt(dir_vec[0]**2 + dir_vec[1]**2 + dir_vec[2]**2)
+        distance = vtk_helpers.calculate_norm(vtk_helpers.direction_vector(fp, pos))
         unit_new = directions[key]
 
         new_pos = [fp[i] + unit_new[i] * distance for i in range(3)]
@@ -264,8 +263,8 @@ class VolumeViewer(QtWidgets.QMainWindow):
         fp = camera.GetFocalPoint()
         pos = camera.GetPosition()
 
-        dir_vec = [pos[i] - fp[i] for i in range(3)]
-        norm = math.sqrt(dir_vec[0]**2 + dir_vec[1]**2 + dir_vec[2]**2)
+        dir_vec = vtk_helpers.direction_vector(fp, pos)
+        norm = vtk_helpers.calculate_norm(dir_vec)
         if norm == 0:
             return
         unit_dir = [d / norm for d in dir_vec]
@@ -279,6 +278,9 @@ class VolumeViewer(QtWidgets.QMainWindow):
 
     def set_zoom_2x(self):
         self.set_zoom_factor(2.0)
+
+    def set_zoom_half(self):
+        self.set_zoom_factor(0.5)
 
     def reset_camera(self):
         """Reset the camera to the default position."""

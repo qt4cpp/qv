@@ -61,3 +61,15 @@ def get_camera_angles(camera: vtk.vtkCamera):
 def return_dicom_dir():
     dicom_dir = "../dicom/HF_head/"
     return dicom_dir
+
+
+
+def direction_vector(start_point: tuple[float, float, float],
+                     end_point: tuple[float, float, float]) -> tuple[float, float, float]:
+    """Calculate the direction vector between two points."""
+    return end_point[0] - start_point[0], end_point[1] - start_point[1], end_point[2] - start_point[2]
+
+
+def calculate_norm(vector: tuple[float, float, float]) -> float:
+    """Calculate the norm of a vector."""
+    return np.sqrt(vector[0] ** 2 + vector[1] ** 2 + vector[2] ** 2)

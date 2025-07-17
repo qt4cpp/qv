@@ -40,6 +40,7 @@ class Ui_MainWindow:
         view_menu.addAction("Front view", window.front_view)
         view_menu.addAction("Reset Zoom", window.reset_zoom)
         view_menu.addAction("2x zoom", window.set_zoom_2x)
+        view_menu.addAction("0.5x zoom", window.set_zoom_half)
 
 
     def setup_status(self, window: QMainWindow, **kwargs):
