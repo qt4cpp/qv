@@ -181,7 +181,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
             self.renderer.GetActiveCamera()
         )
 
-    def set_camera_angle(self, view: str) -> None:
+    def set_camera_view(self, view: str) -> None:
         """
         Set the camera to a preset view angle.
         Valid view values: 'front', 'back', 'left', 'right', 'top', 'bottom'.
@@ -226,7 +226,22 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.azimuth, self.elevation = vtk_helpers.get_camera_angles(camera)
 
     def front_view(self):
-        self.set_camera_angle('front')
+        self.set_camera_view('front')
+
+    def back_view(self):
+        self.set_camera_view('back')
+
+    def left_view(self):
+        self.set_camera_view('left')
+
+    def right_view(self):
+        self.set_camera_view('right')
+
+    def top_view(self):
+        self.set_camera_view('top')
+
+    def bottom_view(self):
+        self.set_camera_view('bottom')
 
     def get_volume_center(self) -> tuple[float, float, float]:
         bounds = self.volume.GetBounds()  # (xmin,xmax, ymin,ymax, zmin,zmax)
