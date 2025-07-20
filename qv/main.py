@@ -59,6 +59,11 @@ class VolumeViewer(QtWidgets.QMainWindow):
 
     def register_command(self):
         self.shortcut_mgr.add_callback("front_view", self.front_view)
+        self.shortcut_mgr.add_callback("back_view", self.back_view)
+        self.shortcut_mgr.add_callback("left_view", self.left_view)
+        self.shortcut_mgr.add_callback("right_view", self.right_view)
+        self.shortcut_mgr.add_callback("top_view", self.top_view)
+        self.shortcut_mgr.add_callback("bottom_view", self.bottom_view)
 
     def update_status(self, **kwargs):
         """Update the status fields with the given keyword arguments and

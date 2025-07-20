@@ -1,3 +1,8 @@
 {
-  "front_view": "a"
+  "front_view": "a",
+  "back_view": "b",
+  "left_view": "l",
+  "right_view": "r",
+  "top_view": "h",
+  "bottom_view": "f"
 }
