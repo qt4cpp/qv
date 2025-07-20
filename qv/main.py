@@ -1,6 +1,7 @@
 import copy
 import sys
 import math
+from pathlib import Path
 
 import vtk
 from PySide6 import QtWidgets, QtCore
@@ -8,6 +9,7 @@ from vtkmodules.util.numpy_support import vtk_to_numpy
 
 import qv.utils.vtk_helpers as vtk_helpers
 from qv.status import STATUS_FIELDS, StatusField
+from shortcut_manager import ShortcutManager
 from ui_mainwindow import Ui_MainWindow
 from vtk_helpers import return_dicom_dir
 
@@ -17,6 +19,9 @@ class VolumeViewer(QtWidgets.QMainWindow):
 
     def __init__(self, dicom_dir: str | None = None, rotation_factor: float = 0.5) -> None:
         super().__init__()
+        config_path = Path(__file__).parent.parent / "settings"
+        self.shortcut_mgr = ShortcutManager(parent=self, config_path=config_path)
+        self.register_command()
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
 
@@ -51,6 +56,9 @@ class VolumeViewer(QtWidgets.QMainWindow):
 
         self.show()
         self.interactor.Initialize()
+
+    def register_command(self):
+        self.shortcut_mgr.add_callback("front_view", self.front_view)
 
     def update_status(self, **kwargs):
         """Update the status fields with the given keyword arguments and
