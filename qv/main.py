@@ -205,33 +205,45 @@ class VolumeViewer(QtWidgets.QMainWindow):
         directions = {
             'front':  (0.0, 1.0, 0.0),
             'back':   (0.0, -1.0, 0.0),
-            'left':   (-1.0, 0.0, 0.0),
-            'right':  (1.0, 0.0, 0.0),
-            'top':    (0.0, 0.0, 1.0),
-            'bottom': (0.0, 0.0, -1.0),
+            'left':   (1.0, 0.0, 0.0),
+            'right':  (-1.0, 0.0, 0.0),
+            'top':    (0.0, 0.0, -1.0),
+            'bottom': (0.0, 0.0, 1.0),
         }
         # Up vectors to keep orientation
         viewups = {
-            'front':  (0.0, 0.0, 1.0),
-            'back':   (0.0, 0.0, 1.0),
-            'left':   (0.0, 0.0, 1.0),
-            'right':  (0.0, 0.0, 1.0),
-            'top':    (0.0, 1.0, 0.0),
+            'front':  (0.0, 0.0, -1.0),
+            'back':   (0.0, 0.0, -1.0),
+            'left':   (0.0, 0.0, -1.0),
+            'right':  (0.0, 0.0, -1.0),
+            'top':    (0.0, -1.0, 0.0),
             'bottom': (0.0, 1.0, 0.0),
         }
         key = view.lower()
         if key not in directions:
             return
 
+        patient_matrix = None
+        if self.volume:
+            mapper = self.volume.GetMapper()
+            image = mapper.GetInput()
+            if hasattr(image, "GetDirectionMatrix"):
+                patient_matrix = image.GetDirectionMatrix()
+
         camera = self.renderer.GetActiveCamera()
         fp = camera.GetFocalPoint()
         pos = camera.GetPosition()
         distance = vtk_helpers.calculate_norm(vtk_helpers.direction_vector(fp, pos))
-        unit_new = directions[key]
+        dir_vec = directions[key]
+        up_vec = viewups[key]
 
-        new_pos = [fp[i] + unit_new[i] * distance for i in range(3)]
+        if patient_matrix:
+            dir_vec = vtk_helpers.transform_vector(dir_vec, patient_matrix)
+            up_vec = vtk_helpers.transform_vector(up_vec, patient_matrix)
+
+        new_pos = [fp[i] + dir_vec[i] * distance for i in range(3)]
         camera.SetPosition(*new_pos)
-        camera.SetViewUp(*viewups[key])
+        camera.SetViewUp(*up_vec)
         # Apply position and orientation
         self.renderer.ResetCameraClippingRange()
         # Update internal azimuth/elevation status

@@ -1,10 +1,11 @@
 import math
+from pathlib import Path
 
 import vtk
 import numpy as np
 from PySide6 import QtWidgets
 from matplotlib import pyplot as plt
-import vtkmodules.vtkDICOM
+from vtkmodules.vtkDICOM import vtkDICOMReader, vtkDICOMTag
 
 
 def load_dicom_series(directory: str) -> vtk.vtkImageData:
@@ -62,6 +63,12 @@ def return_dicom_dir():
     dicom_dir = "../dicom/HF_head/"
     return dicom_dir
 
+
+def transform_vector(v, mat):
+    result = [0.0, 0.0, 0.0]
+    for i in range(3):
+        result[i] = sum(v[j] * mat.GetElement(i, j) for j in range(3))
+    return result
 
 
 def direction_vector(start_point: tuple[float, float, float],
