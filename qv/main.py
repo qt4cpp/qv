@@ -11,6 +11,7 @@ import qv.utils.vtk_helpers as vtk_helpers
 from qv.status import STATUS_FIELDS, StatusField
 from shortcut_manager import ShortcutManager
 from ui_mainwindow import Ui_MainWindow
+from volumeviewer_interactor_style import VolumeViewerInteractorStyle
 from vtk_helpers import return_dicom_dir
 
 
@@ -30,6 +31,8 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.renderer = vtk.vtkRenderer()
         w.GetRenderWindow().AddRenderer(self.renderer)
         self.interactor = w.GetRenderWindow().GetInteractor()
+        style = VolumeViewerInteractorStyle(self)
+        self.interactor.SetInteractorStyle(style)
 
         self._right_dragging = False
         self._left_dragging = False
@@ -173,7 +176,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
 
     def rotate_camera(self, dx: int, dy: int) -> None:
         da = -dx * self.rotation_factor
-        de = dy * self.rotation_factor
+        de = -dy * self.rotation_factor
         camera = self.renderer.GetActiveCamera()
         camera.Azimuth(da)
         camera.Elevation(de)
@@ -341,40 +344,40 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.apply_camera_angle()
         self.ui.vtk_widget.GetRenderWindow().Render()
 
-    def eventFilter(self, obj: QtCore.QObject, event: QtCore.QEvent) -> bool:
-        if obj is self.ui.vtk_widget:
-            if event.type() == QtCore.QEvent.MouseButtonPress:
-                if event.button() == QtCore.Qt.RightButton:
-                    self._right_dragging = True
-                    self._last_pos = event.pos()
-                    return True
-                if event.button() == QtCore.Qt.LeftButton:
-                    self._left_dragging = True
-                    self._last_pos = event.pos()
-                    return True
-            if event.type() == QtCore.QEvent.MouseMove:
-                if self._right_dragging:
-                    pos = event.pos()
-                    dx = pos.x() - self._last_pos.x()
-                    dy = pos.y() - self._last_pos.y()
-                    self._last_pos = pos
-                    self.adjust_window_level(dx, dy)
-                    return True
-                if self._left_dragging:
-                    pos = event.pos()
-                    dx = pos.x() - self._last_pos.x()
-                    dy = pos.y() - self._last_pos.y()
-                    self._last_pos = pos
-                    self.rotate_camera(dx, dy)
-                    return True
-            if event.type() == QtCore.QEvent.MouseButtonRelease:
-                if event.button() == QtCore.Qt.RightButton:
-                    self._right_dragging = False
-                    return True
-                if event.button() == QtCore.Qt.LeftButton:
-                    self._left_dragging = False
-                    return True
-        return super().eventFilter(obj, event)
+    # def eventFilter(self, obj: QtCore.QObject, event: QtCore.QEvent) -> bool:
+    #     if obj is self.ui.vtk_widget:
+    #         if event.type() == QtCore.QEvent.MouseButtonPress:
+    #             if event.button() == QtCore.Qt.RightButton:
+    #                 self._right_dragging = True
+    #                 self._last_pos = event.pos()
+    #                 return True
+    #             if event.button() == QtCore.Qt.LeftButton:
+    #                 self._left_dragging = True
+    #                 self._last_pos = event.pos()
+    #                 return True
+    #         if event.type() == QtCore.QEvent.MouseMove:
+    #             if self._right_dragging:
+    #                 pos = event.pos()
+    #                 dx = pos.x() - self._last_pos.x()
+    #                 dy = pos.y() - self._last_pos.y()
+    #                 self._last_pos = pos
+    #                 self.adjust_window_level(dx, dy)
+    #                 return True
+    #             if self._left_dragging:
+    #                 pos = event.pos()
+    #                 dx = pos.x() - self._last_pos.x()
+    #                 dy = pos.y() - self._last_pos.y()
+    #                 self._last_pos = pos
+    #                 self.rotate_camera(dx, dy)
+    #                 return True
+    #         if event.type() == QtCore.QEvent.MouseButtonRelease:
+    #             if event.button() == QtCore.Qt.RightButton:
+    #                 self._right_dragging = False
+    #                 return True
+    #             if event.button() == QtCore.Qt.LeftButton:
+    #                 self._left_dragging = False
+    #                 return True
+    #     return super().eventFilter(obj, event)
 
     @property
     def azimuth(self) -> float:
