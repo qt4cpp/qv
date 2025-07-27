@@ -39,13 +39,10 @@ def format_azimuth(azimuth: float) -> str:
     - -> LAO
     + -> RAO
     """
-    az = azimuth - 90
-    if -180 <= az <= 0:
-        return f"LAO {abs(az):.2f}"
-    elif -270 <= az < -180:
-        return f"RAO {360+az:.2f}"
+    if 0 <= azimuth <= 180:
+        return f"LAO {azimuth:.1f}"
     else:
-        return f"RAO {abs(az):.2f}"
+        return f"RAO {abs(360-azimuth):.1f}"
 
 
 def format_elevation(elevation: float) -> str:
@@ -54,11 +51,10 @@ def format_elevation(elevation: float) -> str:
     + -> CAU
     - -> CRA
     """
-    angle = abs(elevation)
-    if elevation >= 0:
-        return f"CAU {angle:.2f}"
+    if 0 <= elevation <= 180:
+        return f"CRA {elevation:.1f}"
     else:
-        return f"CRA {angle:.2f}"
+        return f"CAU {abs(360-elevation):.1f}"
 
 
 # If you want to add a new value, add field and then,

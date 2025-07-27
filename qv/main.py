@@ -109,13 +109,14 @@ class VolumeViewer(QtWidgets.QMainWindow):
         camera = vtk.vtkCamera()
         camera.SetClippingRange(0.001, 100)
         camera.SetFocalPoint(0, 0, 0)
-        self.apply_camera_angle()
+
         self.renderer.SetActiveCamera(camera)
 
         self.renderer.ResetCamera()
         self.update_transfer_functions()
         # self.test_AddRGBPoint()
         self.ui.vtk_widget.GetRenderWindow().Render()
+        self.set_camera_view('front')
 
         # self.ui.histgram_widget.set_viewing_range(self.window_level-self.window_width / 2,
         #                                    self.window_level+self.window_width / 2)
@@ -171,13 +172,16 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.update_histgram_window()
 
     def rotate_camera(self, dx: int, dy: int) -> None:
+        da = -dx * self.rotation_factor
+        de = dy * self.rotation_factor
         camera = self.renderer.GetActiveCamera()
-        camera.Azimuth((-dx * self.rotation_factor) % 360)
-        camera.Elevation((dy * self.rotation_factor))
+        camera.Azimuth(da)
+        camera.Elevation(de)
         camera.OrthogonalizeViewUp()
         self.renderer.ResetCameraClippingRange()
         self.ui.vtk_widget.GetRenderWindow().Render()
-        self.azimuth, self.elevation = vtk_helpers.get_camera_angles(camera)
+        self.azimuth = (self.azimuth + da) % 360
+        self.elevation = (self.elevation + de) % 360
 
     def apply_camera_angle(self):
         azimuth, elevation = 0, 90
@@ -190,9 +194,10 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.renderer.SetActiveCamera(camera)
         self.renderer.ResetCameraClippingRange()
         self.ui.vtk_widget.GetRenderWindow().Render()
-        self.azimuth, self.elevation = vtk_helpers.get_camera_angles(
-            self.renderer.GetActiveCamera()
-        )
+        self.azimuth, self.elevation = azimuth, elevation
+        # self.azimuth, self.elevation = vtk_helpers.get_camera_angles(
+        #     self.renderer.GetActiveCamera()
+        # )
 
     def set_camera_view(self, view: str) -> None:
         """
@@ -218,6 +223,14 @@ class VolumeViewer(QtWidgets.QMainWindow):
             'right':  (0.0, 0.0, -1.0),
             'top':    (0.0, -1.0, 0.0),
             'bottom': (0.0, 1.0, 0.0),
+        }
+        angles = {
+            'front':  (0.0, 0.0),
+            'back':   (180, 0.0),
+            'left':   (90, 0.0),
+            'right':   (270, 0.0),
+            'top':    (0.0, 90.0),
+            'bottom': (0.0, 270.0),
         }
         key = view.lower()
         if key not in directions:
@@ -248,7 +261,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.renderer.ResetCameraClippingRange()
         # Update internal azimuth/elevation status
         self.ui.vtk_widget.GetRenderWindow().Render()
-        self.azimuth, self.elevation = vtk_helpers.get_camera_angles(camera)
+        self.azimuth, self.elevation = angles[key]
 
     def front_view(self):
         self.set_camera_view('front')
