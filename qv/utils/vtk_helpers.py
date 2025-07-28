@@ -9,6 +9,7 @@ from vtkmodules.vtkDICOM import vtkDICOMReader, vtkDICOMTag
 
 
 def load_dicom_series(directory: str) -> vtk.vtkImageData:
+    """Load a DICOM series from a directory."""
     reader = vtk.vtkDICOMImageReader()
     reader.SetDirectoryName(directory)
     reader.Update()
@@ -16,6 +17,7 @@ def load_dicom_series(directory: str) -> vtk.vtkImageData:
 
 
 def select_dicom_directory() -> str | None:
+    """Select a directory containing DICOM series."""
     dialog = QtWidgets.QFileDialog()
     dialog.setFileMode(QtWidgets.QFileDialog.Directory)
     if dialog.exec():
@@ -39,7 +41,13 @@ def plot_hist_clip(volume, bins=100, lower_pct=25, upper_pct=99):
     plt.show()
 
 
-def get_camera_angles(camera: vtk.vtkCamera):
+def get_camera_angles(camera: vtk.vtkCamera) -> tuple[float, float]:
+    """
+    Calculate the camera angles (azimuth and elevation)
+    by the direction vector from the focal point to the camera position.
+    :param camera:
+    :return: azimuth, elevation
+    """
     # 1) 方向ベクトルを取得
     pos = np.array(camera.GetPosition())
     fp = np.array(camera.GetFocalPoint())
@@ -65,6 +73,7 @@ def return_dicom_dir():
 
 
 def transform_vector(v, mat):
+    """Transform a vector by a 3x3 matrix."""
     result = [0.0, 0.0, 0.0]
     for i in range(3):
         result[i] = sum(v[j] * mat.GetElement(i, j) for j in range(3))

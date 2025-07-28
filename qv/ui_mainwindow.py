@@ -7,7 +7,13 @@ from histgram import HistogramWidget
 
 
 class Ui_MainWindow:
+    """
+    Manage the UI for the main window.
+    """
     def setupUi(self, window: QMainWindow):
+        """
+        Setup the UI for the main window.
+        """
         window.setWindowTitle("QV - DICOM Viewer")
         central_widget = QWidget(window)
         self.vtk_widget = QVTKRenderWindowInteractor(central_widget)
@@ -30,6 +36,7 @@ class Ui_MainWindow:
         self.create_menus(window)
 
     def create_menus(self, window: QMainWindow):
+        """Create the menus for the main window."""
         file_menu = window.menuBar().addMenu("&File")
         view_menu = window.menuBar().addMenu("&View")
 
@@ -44,6 +51,7 @@ class Ui_MainWindow:
 
 
     def setup_status(self, window: QMainWindow, **kwargs):
+        """Setup the status bar for the main window."""
         status_bar = window.statusBar()
         for key, field in kwargs.items():
             if not field.visible:

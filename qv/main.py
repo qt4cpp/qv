@@ -16,6 +16,7 @@ from vtk_helpers import return_dicom_dir
 
 
 class VolumeViewer(QtWidgets.QMainWindow):
+    """Main window for the volume viewer."""
     statusChanged = QtCore.Signal(str, str)
 
     def __init__(self, dicom_dir: str | None = None, rotation_factor: float = 0.5) -> None:
@@ -61,6 +62,10 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.interactor.Initialize()
 
     def register_command(self):
+        """
+        Register the commands for the volume viewer.
+        Commands are written in the settings file.
+        """
         self.shortcut_mgr.add_callback("front_view", self.front_view)
         self.shortcut_mgr.add_callback("back_view", self.back_view)
         self.shortcut_mgr.add_callback("left_view", self.left_view)
@@ -69,8 +74,10 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.shortcut_mgr.add_callback("bottom_view", self.bottom_view)
 
     def update_status(self, **kwargs):
-        """Update the status fields with the given keyword arguments and
-         refresh the labels."""
+        """
+        Update the status fields with the given keyword arguments and
+        refresh the labels.
+         """
         for key, value in kwargs.items():
             field = self.status_fields.get(key)
             if field is not None:
@@ -83,6 +90,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.load_volume(dicom_dir)
 
     def load_volume(self, dicom_dir: str) -> None:
+        """Load a volume from a DICOM directory."""
         image = vtk_helpers.load_dicom_series(dicom_dir)
         self.scalar_range = image.GetScalarRange()
         self.window_level = round(min(4096.0, sum(self.scalar_range) / 2.0))
@@ -134,6 +142,11 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.ui.vtk_widget.GetRenderWindow().Render()
 
     def update_transfer_functions(self) -> None:
+        """
+        Update the transfer functions for the volume.
+        This function handles the window/level and color/opacity transfer functions.
+        :return: None
+        """
         if self.color_func is None or self.opacity_func is None:
             return
 
@@ -152,6 +165,10 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.ui.vtk_widget.GetRenderWindow().Render()
 
     def update_histgram_window(self) -> None:
+        """
+        Update the viewing range of the histogram window.
+        :return: None
+        """
         if self.ui.histgram_widget is None:
             return
 
@@ -159,6 +176,12 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.ui.histgram_widget.update_viewing_graph(pwf)
 
     def adjust_window_level(self, dx: int, dy: int) -> None:
+        """
+        Change the window/level of the volume according to the mouse movement.
+        :param dx:
+        :param dy:
+        :return: None
+        """
         if self.window_width is None or self.window_level is None:
             return
 
@@ -175,6 +198,12 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.update_histgram_window()
 
     def rotate_camera(self, dx: int, dy: int) -> None:
+        """
+        Rotate the camera according to the mouse movement.
+        :param dx:
+        :param dy:
+        :return: None
+        """
         da = -dx * self.rotation_factor
         de = -dy * self.rotation_factor
         camera = self.renderer.GetActiveCamera()
@@ -187,6 +216,10 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.elevation = (self.elevation + de) % 360
 
     def apply_camera_angle(self):
+        """
+        Apply a pre-defined position to the current camera angle.
+        :return:
+        """
         azimuth, elevation = 0, 90
         camera = self.renderer.GetActiveCamera()
         camera.Azimuth(azimuth)
@@ -285,6 +318,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.set_camera_view('bottom')
 
     def get_volume_center(self) -> tuple[float, float, float]:
+        """Return the iso-center of the whole volume."""
         bounds = self.volume.GetBounds()  # (xmin,xmax, ymin,ymax, zmin,zmax)
         center = (
             0.5 * (bounds[0] + bounds[1]),
@@ -315,6 +349,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.set_zoom_factor(1.0)
 
     def set_zoom_factor(self, factor: float):
+        """Set the camera zoom factor."""
         camera = self.renderer.GetActiveCamera()
         fp = camera.GetFocalPoint()
         pos = camera.GetPosition()
@@ -434,15 +469,9 @@ def main():
     if app is None:
         app = QtWidgets.QApplication(sys.argv)
 
-    # DICOM ディレクトリの取得
-    # dicom_dir = sys.argv[1] if len(sys.argv) > 1 else None
-    # if not dicom_dir:
-    #     dicom_dir = vtk_helpers.select_dicom_directory()
-    #     if dicom_dir is None:
-    #         return
-
     # ビューアーを起動
     # viewer = VolumeViewer(dicom_dir)
+    # 暫定的に自動的にDICOM画像を読み込むようにする。
     viewer = VolumeViewer(return_dicom_dir())
 
     # アプリケーションを実行（正常終了でプロセス終了）

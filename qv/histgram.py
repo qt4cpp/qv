@@ -31,6 +31,12 @@ class HistogramWidget(pg.PlotWidget):
             self.set_data(data)
 
     def set_data(self, data: np.ndarray, bins: int = 200):
+        """
+        Set the data for the histogram.
+        :param data: numpy array
+        :param bins: datastore for the histogram
+        :return: None
+        """
         flat = data.flatten()
         counts, edges = np.histogram(flat, bins=bins)
         _, y_hi = np.percentile(counts, [0, 98])
@@ -43,16 +49,19 @@ class HistogramWidget(pg.PlotWidget):
             symbol=None,
         )
 
-    def set_viewing_range(self, left: int, right: int):
-        pass
-
     def update_viewing_graph(self, pwf):
+        """
+        Update the viewing graph based on the Piecewise function.
+        :param pwf: Opacity function.
+        :return:
+        """
         self.vb2.clear()
         xs, ys = sample_opacity(pwf)
         opacity_curve = pg.PlotDataItem(x=xs, y=ys, pen=pg.mkPen(color=(255, 255, 60), width=1))
         self.vb2.addItem(opacity_curve)
 
     def update_view(self):
+        """Update the view when the window is resized."""
         self.vb2.setGeometry(self.plot_item.getViewBox().sceneBoundingRect())
         self.vb2.linkedViewChanged(self.plot_item.getViewBox(), self.vb2.XAxis)
 
@@ -89,6 +98,10 @@ def show_histgram_window(data: np.ndarray, bins: int = 1024):
 
 
 def minimum_show_histgram_window():
+    """
+    Display a histogram of the given data.
+    This function is used for testing.
+    """
     x = np.arange(1000)
     y = np.random.normal(size=(3,1000))
     plot_widget = pg.PlotWidget(title="Plot title")
