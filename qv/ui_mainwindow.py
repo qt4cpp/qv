@@ -1,6 +1,6 @@
 from PySide6 import QtCore
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMainWindow, QWidget, QSplitter, QHBoxLayout, QLabel
+from PySide6.QtWidgets import QMainWindow, QWidget, QSplitter, QHBoxLayout, QLabel, QPushButton
 from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 
 from histgram import HistogramWidget
@@ -34,11 +34,13 @@ class Ui_MainWindow:
         window.setCentralWidget(central_widget)
 
         self.create_menus(window)
+        self.create_clipping_buttons(window)
 
     def create_menus(self, window: QMainWindow):
         """Create the menus for the main window."""
         file_menu = window.menuBar().addMenu("&File")
         view_menu = window.menuBar().addMenu("&View")
+        edit_menu = window.menuBar().addMenu("&Edit")
 
         file_menu.addAction("&Open", window.open_menu)
         file_menu.addAction("&Quit", window.close)
@@ -49,6 +51,19 @@ class Ui_MainWindow:
         view_menu.addAction("2x zoom", window.set_zoom_2x)
         view_menu.addAction("0.5x zoom", window.set_zoom_half)
 
+        edit_menu.addAction("&Clip", window.enter_clip_mode)
+
+    def create_clipping_buttons(self, window: QMainWindow):
+        self.clip_button_widget = QWidget()
+        layout = QHBoxLayout()
+        self.apply_clip_button = QPushButton("Apply", window)
+        self.cancel_clip_button = QPushButton("Cancel", window)
+        layout.addWidget(self.apply_clip_button)
+        layout.addWidget(self.cancel_clip_button)
+        self.clip_button_widget.setLayout(layout)
+        self.clip_button_widget.hide()
+
+        window.statusBar().addPermanentWidget(self.clip_button_widget)
 
     def setup_status(self, window: QMainWindow, **kwargs):
         """Setup the status bar for the main window."""

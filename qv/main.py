@@ -5,9 +5,11 @@ from pathlib import Path
 
 import vtk
 from PySide6 import QtWidgets, QtCore
+from PySide6.QtCore import QEvent
 from vtkmodules.util.numpy_support import vtk_to_numpy
 
 import qv.utils.vtk_helpers as vtk_helpers
+from clipping_function import QVVolumeClipper, ClippingInteractorStyle
 from qv.status import STATUS_FIELDS, StatusField
 from shortcut_manager import ShortcutManager
 from ui_mainwindow import Ui_MainWindow
@@ -32,8 +34,9 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.renderer = vtk.vtkRenderer()
         w.GetRenderWindow().AddRenderer(self.renderer)
         self.interactor = w.GetRenderWindow().GetInteractor()
-        style = VolumeViewerInteractorStyle(self)
-        self.interactor.SetInteractorStyle(style)
+        self._default_interactor_style = VolumeViewerInteractorStyle(self)
+        self.interactor.SetInteractorStyle(self._default_interactor_style)
+        self._clipping_interactor_style = ClippingInteractorStyle(self)
 
         self._right_dragging = False
         self._left_dragging = False
@@ -61,6 +64,22 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.show()
         self.interactor.Initialize()
 
+        self.clipper = QVVolumeClipper(self)
+        # Actor for visualize the clipping region.
+        self.clipper_actor = vtk.vtkActor()
+        self.clipper_polydata = vtk.vtkPolyData()
+        self.clipper_mapper = vtk.vtkPolyDataMapper()
+        self.clipper_mapper.SetInputData(self.clipper_polydata)
+        self.clipper_actor.SetMapper(self.clipper_mapper)
+        self.clipper_actor.GetProperty().SetColor(1, 1, 0)
+        self.clipper_actor.GetProperty().SetLineWidth(5)
+        self.clipper_actor.GetProperty().SetOpacity(0.5)
+        self.renderer.AddActor(self.clipper_actor)
+        self.clipping_points = []
+
+        self.ui.apply_clip_button.clicked.connect(self.apply_clipping)
+        self.ui.cancel_clip_button.clicked.connect(self.cancel_clipping)
+
     def register_command(self):
         """
         Register the commands for the volume viewer.
@@ -72,6 +91,13 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.shortcut_mgr.add_callback("right_view", self.right_view)
         self.shortcut_mgr.add_callback("top_view", self.top_view)
         self.shortcut_mgr.add_callback("bottom_view", self.bottom_view)
+
+    def eventFilter(self, obj, event):
+        if obj == self.ui.vtk_widget:
+            if event.type() == QEvent.MouseButtonDblClick:
+                self.interactor.InvokeEvent("LeftButtonDoubleClickEvent")
+                return True
+        return super().eventFilter(obj, event)
 
     def update_status(self, **kwargs):
         """
@@ -426,6 +452,53 @@ class VolumeViewer(QtWidgets.QMainWindow):
     @delta_per_pixel.setter
     def delta_per_pixel(self, value: int):
         self.status_fields["delta_per_pixel"].value = value
+
+    def apply_clipping(self):
+        self.clipper.apply()
+        self.exit_clip_mode()
+
+    def cancel_clipping(self):
+        self.clipper.cancel()
+        self.exit_clip_mode()
+
+    def enter_clip_mode(self):
+        """Enter clip mode."""
+        print("enter_clip_mode")
+        self.interactor.SetInteractorStyle(self._clipping_interactor_style)
+        self.ui.vtk_widget.GetRenderWindow().Render()
+        self.ui.clip_button_widget.show()
+
+    def enter_clip_result_mode(self):
+        """Enter clip result mode to check the result of clipping before applying."""
+        self.interactor.SetInteractorStyle(self._default_interactor_style)
+
+    def exit_clip_mode(self):
+        print("exit_clip_mode")
+        self.interactor.SetInteractorStyle(self._default_interactor_style)
+        self.ui.clip_button_widget.hide()
+
+    def add_clip_point(self, pt: tuple[float, float, float]):
+        self.clipper.add_point(pt)
+        self.clipping_points.append(pt)
+        self.update_clipper_visualization()
+
+    def update_clipper_visualization(self):
+        points = vtk.vtkPoints()
+        lines = vtk.vtkCellArray()
+        n = len(self.clipping_points)
+        for i, pt in enumerate(self.clipping_points):
+            points.InsertNextPoint(pt)
+            if i > 0:
+                lines.InsertNextCell(2)
+                lines.InsertCellPoint(i - 1)
+                lines.InsertCellPoint(i)
+        if n >= 3:
+            lines.InsertNextCell(2)
+            lines.InsertCellPoint(n - 1)
+            lines.InsertCellPoint(0)
+        self.clipper_polydata.SetPoints(points)
+        self.clipper_polydata.SetLines(lines)
+        self.ui.vtk_widget.GetRenderWindow().Render()
 
 
 def main():
