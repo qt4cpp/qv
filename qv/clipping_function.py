@@ -1,6 +1,10 @@
 import vtk
 from typing import TYPE_CHECKING
 
+from vtkmodules.vtkCommonDataModel import vtkImplicitSelectionLoop
+from vtkmodules.vtkImagingStencil import vtkImplicitFunctionToImageStencil
+from vtkmodules.vtkRenderingCore import vtkActor
+
 import vtk_helpers
 
 if TYPE_CHECKING:
@@ -23,12 +27,14 @@ class ClippingInteractorStyle(vtk.vtkInteractorStyleTrackballCamera):
         self.AddObserver("LeftButtonDoubleClickEvent", self.OnLeftButtonDoubleClick)
 
     def OnLeftButtonDown(self, caller, event):
+        """マウスが左クリックされた点を3D座標で受け取り、viewer 経由でClipperに渡す"""
         x, y = self.GetInteractor().GetEventPosition()
         self.picker.Pick(x, y, 0, self.viewer.renderer)
         pt = self.picker.GetPickPosition()
         self.viewer.add_clip_point(pt)
 
     def OnLeftButtonDoubleClick(self, caller, event):
+        """ダブルクリックでクリッピングする領域を閉じる"""
         print("Double click")
         self.viewer.clipper.finalize_clip()
         self.viewer.enter_clip_result_mode()
@@ -41,14 +47,13 @@ class QVVolumeClipper:
     """
     def __init__(self, viewer: "VolumeViewer"):
         self.viewer = viewer
-        self.clip_points = []
+        self.clip_points = []  # ユーザーが打った点
         self.backup_image = None
 
         self.mapper = vtk.vtkGPUVolumeRayCastMapper()
-        self.clip_loop = None
-        self.stenciler = None
-        self.preview_extrude_actor = None
-        self.accum_mask = None
+        self.clip_loop: vtkImplicitSelectionLoop | None = None  # vtkImplicitSelectionLoop
+        self.stenciler: vtkImplicitFunctionToImageStencil | None = None
+        self.preview_extrude_actor: vtkActor | None = None
 
     def _get_current_image_from_viewer(self) -> vtk.vtkImageData | None:
         """viewer.volume から現在の vtkImageData を取得。取得できなければ None。"""
@@ -69,7 +74,7 @@ class QVVolumeClipper:
         if self.backup_image is None or self.clip_loop is None:
             return None
 
-        # clip_loopからステンシルを生成
+        # clip_loopからステンシルを生成。必ずオリジナルと幾何を揃える。でないと位置がずれる。
         stenciler = vtk.vtkImplicitFunctionToImageStencil()
         stenciler.SetInput(self.clip_loop)
         stenciler.SetOutputSpacing(self.backup_image.GetSpacing())
@@ -139,7 +144,7 @@ class QVVolumeClipper:
         fp = cam.GetFocalPoint()
         view_vec = vtk_helpers.direction_vector(cam.GetPosition(), fp)
         norm = vtk_helpers.calculate_norm(view_vec)
-        # 安全側: norm が 0 の場合を防ぐ
+        # norm が 0 の場合を防ぐ
         if norm == 0:
             print("[Clip] Camera direction vector has zero length. Aborting finalize_clip().")
             self.backup_image = None
@@ -147,6 +152,7 @@ class QVVolumeClipper:
             return
         view_vec = [v / norm for v in view_vec]
 
+        # カメラの視線ベクトルに沿って、各店フォーカルポイントに垂直な平面へ正射影する
         vtk_points = vtk.vtkPoints()
         for pt in self.clip_points:
             vec_fp = vtk_helpers.direction_vector(pt, fp)
@@ -182,13 +188,13 @@ class QVVolumeClipper:
         extrude.CappingOn()
         extrude.Update()
 
-        # Make Translucent Preview
+        # Make Preview
         mapper3D = vtk.vtkPolyDataMapper()
         mapper3D.SetInputConnection(extrude.GetOutputPort())
         self.preview_extrude_actor = vtk.vtkActor()
         self.preview_extrude_actor.SetMapper(mapper3D)
         self.preview_extrude_actor.GetProperty().SetColor(0.5, 0.6, 0)
-        self.preview_extrude_actor.GetProperty().SetOpacity(0.4)
+        self.preview_extrude_actor.GetProperty().SetOpacity(1.0)
 
         print("[Finalize] clip_points=", len(self.clip_points))
         print("[Finalize] image_extent=", self.backup_image.GetExtent())
@@ -200,6 +206,8 @@ class QVVolumeClipper:
 
     # A5A800
     def cancel(self):
+        """Cancel clipping and take back the original volume."""
+        print("[Clip] Cancelled.")
         if self.backup_image:
             mapper = vtk.vtkGPUVolumeRayCastMapper()
             mapper.SetInputData(self.backup_image)
@@ -235,6 +243,7 @@ class QVVolumeClipper:
             masker.SetMaskedOutputValue(0)
             masker.Update()
 
+            # クリッピングしたデータを焼き込む
             baked_img = vtk.vtkImageData()
             baked_img.DeepCopy(masker.GetOutput())
 
@@ -251,14 +260,12 @@ class QVVolumeClipper:
             self.viewer.volume.SetMapper(self.mapper)
             self.viewer.ui.vtk_widget.GetRenderWindow().Render()
 
+            # 焼き込んだデータを次のデータとして使用する
             if self.backup_image is None:
                 self.backup_image = vtk.vtkImageData()
             self.backup_image.DeepCopy(baked_img)
 
-            if hasattr(self, 'accum_mask'):
-                self.accum_mask = None
-            mask_img = True
-
+        # もし、mask_img の作成に失敗したら Stencilで0で埋めて焼き込む。
         if mask_img is None:
             self.stenciler = vtk.vtkImplicitFunctionToImageStencil()
             self.stenciler.SetInput(self.clip_loop)
