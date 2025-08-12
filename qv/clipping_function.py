@@ -229,38 +229,35 @@ class QVVolumeClipper:
         # Completely invisible with Binary Mask on GPU mapper if enabled.
         mask_img = self._build_binary_mask_from_clip()
         if mask_img is not None:
-            # 累積マスク: 0を優先
-            if not hasattr(self, "accum_mask") or self.accum_mask is None:
-                self.accum_mask = vtk.vtkImageData()
-                self.accum_mask.DeepCopy(mask_img)
-            else:
-                math_min = vtk.vtkImageMathematics()
-                math_min.SetOperationToMin()
-                math_min.SetInputData(0, self.accum_mask)
-                math_min.SetInputData(1, mask_img)
-                math_min.Update()
-                self.accum_mask.DeepCopy(math_min.GetOutput())
-                # mask_img = self.accum_mask
-            try:
-                self.mapper.SetInputData(self.backup_image)
-                self.mapper.SetMaskInput(self.accum_mask)
+            masker = vtk.vtkImageMask()
+            masker.SetInputData(self.backup_image)
+            masker.SetMaskInputData(mask_img)
+            masker.SetMaskedOutputValue(0)
+            masker.Update()
 
-                print("[Apply] SetMaskInput done:",
-                      getattr(self.mapper, "GetMaskInput", lambda: None)() is not None)
-                if hasattr(self.mapper, "GetMaskType"):
-                    print("[Apply] MaskType:", self.mapper.GetMaskType())
-                print("[Apply] volume uses our mapper:",
-                      self.viewer.volume.GetMapper() is self.mapper)
+            baked_img = vtk.vtkImageData()
+            baked_img.DeepCopy(masker.GetOutput())
 
-                # バイナリマスク指定
-                if hasattr(self.mapper, 'SetMaskTypeToBinary'):
-                    self.mapper.SetMaskTypeToBinary()
-                elif hasattr(self.mapper, 'SetMaskTypeToBinaryMask'):
-                    self.mapper.SetMaskTypeToBinaryMask()
-                else:
-                    print("No Binary mask.")  # 何もなくても 0 / 255 マスクは機能することが多い。
-            except AttributeError:
-                mask_img = None
+            # 新しいマッパーで焼き込み済みデータを表示
+            self.mapper = vtk.vtkGPUVolumeRayCastMapper()
+            self.mapper.SetInputData(baked_img)
+
+            if hasattr(self.mapper, "SetMaskInput"):
+                try:
+                    self.mapper.SetMaskInput(None)
+                except Exception:
+                    pass
+
+            self.viewer.volume.SetMapper(self.mapper)
+            self.viewer.ui.vtk_widget.GetRenderWindow().Render()
+
+            if self.backup_image is None:
+                self.backup_image = vtk.vtkImageData()
+            self.backup_image.DeepCopy(baked_img)
+
+            if hasattr(self, 'accum_mask'):
+                self.accum_mask = None
+            mask_img = True
 
         if mask_img is None:
             self.stenciler = vtk.vtkImplicitFunctionToImageStencil()
@@ -277,10 +274,17 @@ class QVVolumeClipper:
             image_stencil.SetBackgroundValue(0)
             image_stencil.Update()
 
-            self.mapper.SetInputData(image_stencil.GetOutput())
+            baked_img = vtk.vtkImageData()
+            baked_img.DeepCopy(image_stencil.GetOutput())
 
-        self.viewer.volume.SetMapper(self.mapper)
-        self.viewer.ui.vtk_widget.GetRenderWindow().Render()
+            self.mapper = vtk.vtkGPUVolumeRayCastMapper()
+            self.mapper.SetInputData(baked_img)
+            self.viewer.volume.SetMapper(self.mapper)
+            self.viewer.ui.vtk_widget.GetRenderWindow().Render()
+
+            if self.backup_image is None:
+                self.backup_image = vtk.vtkImageData()
+            self.backup_image.DeepCopy(baked_img)
         self.reset()
 
     def reset(self):
