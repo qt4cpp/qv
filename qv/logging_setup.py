@@ -21,6 +21,7 @@ def build_config(app_name: str, level: str = None, log_dir: Path | None = None) 
 
     fmt = "%(asctime)s.%(msecs)03dZ %(levelname)s %(process)d %(threadName)s %(name)s %(message)s"
     datefmt = "%Y-%m-%dT%H:%M:%S"
+    print(level)
     return {
         "version": 1,
         "disable_existing_loggers": False,
