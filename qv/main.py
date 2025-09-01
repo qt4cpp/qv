@@ -34,6 +34,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.register_command()
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
+        logging.debug("UI created.")
 
         w = self.ui.vtk_widget
         w.installEventFilter(self)
@@ -474,7 +475,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
 
     def enter_clip_mode(self):
         """Enter clip mode."""
-        print("enter_clip_mode")
+        logging.debug("enter_clip_mode")
         self.interactor.SetInteractorStyle(self._clipping_interactor_style)
         self.ui.vtk_widget.GetRenderWindow().Render()
         self.ui.clip_button_widget.show()
@@ -484,7 +485,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.interactor.SetInteractorStyle(self._default_interactor_style)
 
     def exit_clip_mode(self):
-        print("exit_clip_mode")
+        logging.debug("exit_clip_mode")
         self.interactor.SetInteractorStyle(self._default_interactor_style)
         self.ui.clip_button_widget.hide()
 
