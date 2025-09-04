@@ -533,7 +533,7 @@ def main():
     viewer = VolumeViewer(return_dicom_dir())
 
     # Qt 終了次にログを確実に止める
-    app.aboutToQuit.connect(logs.stop())
+    app.aboutToQuit.connect(logs.stop)
     try:
         rc = app.exec()
         logger.info("App exit (rc=%s)", rc)

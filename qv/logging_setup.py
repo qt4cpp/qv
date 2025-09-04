@@ -4,7 +4,6 @@ import os
 import queue
 from logging.handlers import QueueHandler, QueueListener, RotatingFileHandler
 from pathlib import Path
-from datetime import datetime, timezone
 
 
 def default_log_dir(app_name: str) -> Path:

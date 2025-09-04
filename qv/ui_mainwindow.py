@@ -9,6 +9,9 @@ from histgram import HistogramWidget
 from qv.utils.log_util import log_io
 
 
+logger = logging.getLogger(__name__)
+
+
 class Ui_MainWindow:
     """
     Manage the UI for the main window.

@@ -16,6 +16,9 @@ if TYPE_CHECKING:
     from main import VolumeViewer
 
 
+logger = logging.getLogger(__name__)
+
+
 class ClippingInteractorStyle(vtk.vtkInteractorStyleTrackballCamera):
     """Clipping interactor style for the volume viewer."""
     def __init__(self, viewer):
