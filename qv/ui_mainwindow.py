@@ -1,15 +1,22 @@
+import logging
+
 from PySide6 import QtCore
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QMainWindow, QWidget, QSplitter, QHBoxLayout, QLabel, QPushButton
 from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 
 from histgram import HistogramWidget
+from qv.utils.log_util import log_io
+
+
+logger = logging.getLogger(__name__)
 
 
 class Ui_MainWindow:
     """
     Manage the UI for the main window.
     """
+    @log_io(level=logging.INFO)
     def setupUi(self, window: QMainWindow):
         """
         Setup the UI for the main window.

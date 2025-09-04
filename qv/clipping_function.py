@@ -1,3 +1,5 @@
+import logging
+
 import vtk
 from typing import TYPE_CHECKING
 
@@ -6,11 +8,15 @@ from vtkmodules.vtkImagingStencil import vtkImplicitFunctionToImageStencil
 from vtkmodules.vtkRenderingCore import vtkActor
 
 import vtk_helpers
+from log_util import log_io
 
 if TYPE_CHECKING:
     # 型チェック時のみインポートする
     # 相互参照となってしまう。
     from main import VolumeViewer
+
+
+logger = logging.getLogger(__name__)
 
 
 class ClippingInteractorStyle(vtk.vtkInteractorStyleTrackballCamera):
@@ -35,7 +41,6 @@ class ClippingInteractorStyle(vtk.vtkInteractorStyleTrackballCamera):
 
     def OnLeftButtonDoubleClick(self, caller, event):
         """ダブルクリックでクリッピングする領域を閉じる"""
-        print("Double click")
         self.viewer.clipper.finalize_clip()
         self.viewer.enter_clip_result_mode()
 
@@ -104,11 +109,12 @@ class QVVolumeClipper:
         mask_img = vtk.vtkImageData()
         mask_img.ShallowCopy(img_stencil.GetOutput())
 
-        print("[Mask] type=", mask_img.GetScalarTypeAsString(),
-              "range=", mask_img.GetScalarRange(),
-              "extent=", mask_img.GetExtent(),
-              "spacing=", mask_img.GetSpacing(),
-              "origin=", mask_img.GetOrigin())
+        logging.debug("[Mask] type=%s range=%s extent=%s spacing=%s origin=%s",
+                      mask_img.GetScalarTypeAsString(),
+                      mask_img.GetScalarRange(),
+                      mask_img.GetExtent(),
+                      mask_img.GetSpacing(),
+                      mask_img.GetOrigin())
         # 期待: type= UnsignedChar / range= (0.0, 255.0)
 
         return mask_img
@@ -118,19 +124,20 @@ class QVVolumeClipper:
         """Add a clipping point."""
         self.clip_points.append(pt)
 
+    @log_io(level=logging.INFO)
     def finalize_clip(self):
         # 入力画像の確保（バックアップ）
         current_image = self._get_current_image_from_viewer()
         if current_image is None:
             # 入力が無ければ以降の処理はできない
-            print("[Clip] No input volume available. Aborting finalize_clip().")
+            logging.info("[Clip] No input volume available. Aborting finalize_clip().")
             self.backup_image = None
             self.clip_loop = None
             return
 
         # クリップ点は最低3点必要（ループ）
         if len(self.clip_points) < 3:
-            print(f"[Clip] Need at least 3 points to form a loop. Got {len(self.clip_points)}.")
+            logging.info(f"[Clip] Need at least 3 points to form a loop. Got {len(self.clip_points)}.")
             self.backup_image = None
             self.clip_loop = None
             return
@@ -196,18 +203,18 @@ class QVVolumeClipper:
         self.preview_extrude_actor.GetProperty().SetColor(0.5, 0.6, 0)
         self.preview_extrude_actor.GetProperty().SetOpacity(1.0)
 
-        print("[Finalize] clip_points=", len(self.clip_points))
-        print("[Finalize] image_extent=", self.backup_image.GetExtent())
-        print("[Finalize] camera_fp=", fp, "view_vec=", view_vec)
+        logging.info("[Finalize] clip_points=%s", len(self.clip_points))
+        logging.info("[Finalize] image_extent=%s", self.backup_image.GetExtent())
+        logging.info("[Finalize] camera_fp=%s view_vec=%s", fp, view_vec)
 
         self.viewer.renderer.AddActor(self.preview_extrude_actor)
         self.viewer.preview_extrude_actor = self.preview_extrude_actor
         self.viewer.ui.vtk_widget.GetRenderWindow().Render()
 
-    # A5A800
+    @log_io(level=logging.INFO)
     def cancel(self):
         """Cancel clipping and take back the original volume."""
-        print("[Clip] Cancelled.")
+        logging.debug("canceled clipping")
         if self.backup_image:
             mapper = vtk.vtkGPUVolumeRayCastMapper()
             mapper.SetInputData(self.backup_image)
@@ -215,6 +222,7 @@ class QVVolumeClipper:
             self.viewer.ui.vtk_widget.GetRenderWindow().Render()
         self.reset()
 
+    @log_io(level=logging.INFO)
     def apply(self):
         # 状態検証
         if self.backup_image is None:
@@ -223,14 +231,14 @@ class QVVolumeClipper:
             if current_image is not None:
                 self.backup_image = vtk.vtkImageData()
                 self.backup_image.DeepCopy(current_image)
-                print("[Clip] backup_image was None. Recovered from current volume.")
+                logging.info("[Clip] backup_image was None. Recovered from current volume.")
             else:
-                print("[Clip] No backup image and no current volume. Aborting apply().")
+                logging.info("[Clip] No backup image and no current volume. Aborting apply().")
                 self.reset()
                 return
 
         if self.clip_loop is None:
-            print("[Clip] clip_loop is None. Did you finalize the clip with enough points?")
+            logging.info("[Clip] clip_loop is None. Did you finalize the clip with enough points?")
             self.reset()
             return
 

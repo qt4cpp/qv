@@ -1,10 +1,15 @@
 import sys
 import json
+import logging
+
 from pathlib import Path
 from typing import Callable
 from PySide6.QtWidgets import QMainWindow, QMenuBar, QMenu
 from PySide6.QtGui import QKeySequence, QAction
 from PySide6.QtCore import QSettings
+
+
+logger = logging.getLogger(__name__)
 
 
 class ShortcutManager:
@@ -42,8 +47,10 @@ class ShortcutManager:
             self._actions[cmd] = action
 
     def _on_action_triggered(self, cmd: str):
+        logger.debug(f"[ShortcutManager] Action triggered: {cmd}")
         cb = self._callbacks.get(cmd)
         if cb:
+
             cb()
         else:
             print(f"[ShortcutManager] No callback registered for: {cmd}")

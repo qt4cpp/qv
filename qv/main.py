@@ -1,4 +1,5 @@
 import copy
+import logging
 import sys
 import math
 from pathlib import Path
@@ -9,12 +10,17 @@ from PySide6.QtCore import QEvent
 from vtkmodules.util.numpy_support import vtk_to_numpy
 
 import qv.utils.vtk_helpers as vtk_helpers
+from qv.utils.log_util import log_io
 from clipping_function import QVVolumeClipper, ClippingInteractorStyle
 from qv.status import STATUS_FIELDS, StatusField
 from shortcut_manager import ShortcutManager
 from ui_mainwindow import Ui_MainWindow
 from volumeviewer_interactor_style import VolumeViewerInteractorStyle
 from vtk_helpers import return_dicom_dir
+from logging_setup import LogSystem
+
+
+logger = logging.getLogger(__name__)
 
 
 class VolumeViewer(QtWidgets.QMainWindow):
@@ -28,6 +34,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.register_command()
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
+        logging.debug("UI created.")
 
         w = self.ui.vtk_widget
         w.installEventFilter(self)
@@ -95,6 +102,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
     def eventFilter(self, obj, event):
         if obj == self.ui.vtk_widget:
             if event.type() == QEvent.MouseButtonDblClick:
+                logger.debug("Mouse double click event detected ->  LeftButtonDoubleClickEvent")
                 self.interactor.InvokeEvent("LeftButtonDoubleClickEvent")
                 return True
         return super().eventFilter(obj, event)
@@ -115,8 +123,10 @@ class VolumeViewer(QtWidgets.QMainWindow):
             return
         self.load_volume(dicom_dir)
 
+    @log_io(level=logging.INFO)
     def load_volume(self, dicom_dir: str) -> None:
         """Load a volume from a DICOM directory."""
+        logger.info(f"Loading volume from {dicom_dir}                                                                                                                                                                                                                              ")
         image = vtk_helpers.load_dicom_series(dicom_dir)
         self.scalar_range = image.GetScalarRange()
         self.window_level = round(min(4096.0, sum(self.scalar_range) / 2.0))
@@ -158,6 +168,8 @@ class VolumeViewer(QtWidgets.QMainWindow):
         # self.ui.histgram_widget.set_viewing_range(self.window_level-self.window_width / 2,
         #                                    self.window_level+self.window_width / 2)
         self.ui.histgram_widget.update_viewing_graph(self.volume_property.GetScalarOpacity())
+        logging.info("Volume loaded: extent=%s spacing=%s origin=%s",
+                     image.GetExtent(), image.GetSpacing(), image.GetOrigin())
 
     def test_AddRGBPoint(self) -> None:
         self.color_func.AddRGBPoint(0, 0.0, 0.0, 0.0)
@@ -463,7 +475,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
 
     def enter_clip_mode(self):
         """Enter clip mode."""
-        print("enter_clip_mode")
+        logging.debug("enter_clip_mode")
         self.interactor.SetInteractorStyle(self._clipping_interactor_style)
         self.ui.vtk_widget.GetRenderWindow().Render()
         self.ui.clip_button_widget.show()
@@ -473,7 +485,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.interactor.SetInteractorStyle(self._default_interactor_style)
 
     def exit_clip_mode(self):
-        print("exit_clip_mode")
+        logging.debug("exit_clip_mode")
         self.interactor.SetInteractorStyle(self._default_interactor_style)
         self.ui.clip_button_widget.hide()
 
@@ -502,6 +514,13 @@ class VolumeViewer(QtWidgets.QMainWindow):
 
 
 def main():
+    logs = LogSystem("qv")
+
+    # 未処理例外はログを残す
+    def excepthook(exctype, value, tb):
+        logging.getLogger("qv").exception("Uncaught exception", exc_info=(exctype, value, tb))
+    sys.excepthook = excepthook
+
     # 既存の QApplication インスタンスを取得。なければ新規作成。
     app = QtWidgets.QApplication.instance()
     if app is None:
@@ -510,10 +529,17 @@ def main():
     # ビューアーを起動
     # viewer = VolumeViewer(dicom_dir)
     # 暫定的に自動的にDICOM画像を読み込むようにする。
+    logger.info("App start")
     viewer = VolumeViewer(return_dicom_dir())
 
-    # アプリケーションを実行（正常終了でプロセス終了）
-    sys.exit(app.exec())
+    # Qt 終了次にログを確実に止める
+    app.aboutToQuit.connect(logs.stop)
+    try:
+        rc = app.exec()
+        logger.info("App exit (rc=%s)", rc)
+        sys.exit(rc)
+    finally:
+        logs.stop()  # 念のため
 
 
 if __name__ == "__main__":
