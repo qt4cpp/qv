@@ -1,7 +1,6 @@
 import copy
 import logging
 import sys
-import math
 from pathlib import Path
 
 import vtk
@@ -14,7 +13,7 @@ from qv.utils.log_util import log_io
 from clipping_function import QVVolumeClipper, ClippingInteractorStyle
 from qv.status import STATUS_FIELDS, StatusField
 from shortcut_manager import ShortcutManager
-from ui_mainwindow import Ui_MainWindow
+from ui.ui_mainwindow import Ui_MainWindow
 from volumeviewer_interactor_style import VolumeViewerInteractorStyle
 from vtk_helpers import return_dicom_dir
 from logging_setup import LogSystem
