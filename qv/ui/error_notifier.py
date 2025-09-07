@@ -55,7 +55,7 @@ class ErrorNotifier(QObject):
             if severity in ("error", "critical"):
                 box = QMessageBox()
                 box.setIcon(QMessageBox.Critical if severity == "critical"
-                            else QErrorMessage.Warning)
+                            else QMessageBox.Warning)
                 box.setWindowTitle(title)
                 box.setText(msg)
 

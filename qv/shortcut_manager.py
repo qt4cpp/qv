@@ -1,3 +1,4 @@
+import os
 import sys
 import json
 import logging
@@ -7,6 +8,8 @@ from typing import Callable
 from PySide6.QtWidgets import QMainWindow, QMenuBar, QMenu
 from PySide6.QtGui import QKeySequence, QAction
 from PySide6.QtCore import QSettings
+
+from qv.ui.error_notifier import ErrorNotifier
 
 
 logger = logging.getLogger(__name__)
@@ -23,6 +26,10 @@ class ShortcutManager:
         self._default_shortcuts = self._load_default_config()
         self._load_user_overrides()
         self._register_actions()
+
+        self.dev_mode = str(os.getenv("QV_DEV", "")).lower() in ("1", "true", "yes")
+        logger.debug("ShortcutManager initialized Dev mode: %s", self.dev_mode)
+
 
     def _load_default_config(self) -> dict[str, str]:
         try:
@@ -47,13 +54,33 @@ class ShortcutManager:
             self._actions[cmd] = action
 
     def _on_action_triggered(self, cmd: str):
-        logger.debug(f"[ShortcutManager] Action triggered: {cmd}")
+        logger.debug("Action triggered: %s", cmd)
         cb = self._callbacks.get(cmd)
         if cb:
-
-            cb()
+            func_name = getattr(cb, "__qualname__", repr(cb))
+            func_module = getattr(cb, "__module__", "")
+            logger.info("Shortcut triggered: %s -> %s.%s", cmd, func_module, func_name)
+            try:
+                cb()
+            except Exception:
+                ErrorNotifier.instance().notify(
+                    title="Shortcut Error",
+                    msg=f"Error in shortcut callback",
+                    exc_info=sys.exc_info(),
+                    severity="error",
+                    dedup_seconds=1.0,
+                )
+                if getattr(self, "dev_mode", False):
+                    raise
+                return
         else:
-            print(f"[ShortcutManager] No callback registered for: {cmd}")
+            ErrorNotifier.instance().notify(
+                title="Unregistered Shortcut",
+                msg=f"Command '{cmd}' is not registered.",
+                exc_info=sys.exc_info(),
+                severity="error",
+                dedup_seconds=1.0,
+            )
 
     def add_callback(self, command_name: str, callback: Callable):
         if command_name not in self._actions:
