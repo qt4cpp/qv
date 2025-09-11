@@ -16,7 +16,23 @@ logger = logging.getLogger(__name__)
 
 
 class ShortcutManager:
-    """Manage keyboard shortcuts."""
+    """
+    Manage keyboard shortcuts with split configuration files.
+    -------------------------
+    This manager now reads two kinds of settings.
+    1) `shortcuts.json` (package default) + user overrides in QSettings under `shortcuts/*`.
+    2) `settings.json` (package default) for general app settings(e.g., dev_mode)
+       User overrides for general
+    add_callback: Add a callback function for a shortcut.
+    update_shortcut: Update the shortcut for a command.
+    reset_to_default: Reset all shortcuts to default.
+    actions: Return a list of all actions.
+    --------------------------
+    - You need to call add_callback to register a callback function for the given command.
+    - You can use the registered command name. So write the command and the shortcut in the settings file.
+    - ShortcutManager will read the default settings from the file and override them
+    with user-defined shortcuts.
+    """
     def __init__(self, parent: QMainWindow, config_path: Path):
         self.parent = parent
         self.config_path = config_path
@@ -32,6 +48,10 @@ class ShortcutManager:
 
 
     def _load_default_config(self) -> dict[str, str]:
+        """
+        Load default config from the package.
+        Settings are stored in JSON format.
+        """
         try:
             with open(self.config_path / "settings.json", "r", encoding="utf-8") as f:
                 return json.load(f)
@@ -40,12 +60,20 @@ class ShortcutManager:
             return {}
 
     def _load_user_overrides(self):
+        """
+        Override default shortcuts with user-defined shortcuts.
+        :return:
+        """
         for cmd, default_seq in self._default_shortcuts.items():
             user_seq = self.settings.value(f"shortcuts/{cmd}", default_seq)
             if user_seq:
                 self._default_shortcuts[cmd] = user_seq
 
     def _register_actions(self):
+        """
+        Register default actions for each command.
+        :return:
+        """
         for cmd, seq in self._default_shortcuts.items():
             action = QAction(cmd.replace("_", " ").title(), self.parent)
             action.setShortcut(QKeySequence(seq))
@@ -54,6 +82,11 @@ class ShortcutManager:
             self._actions[cmd] = action
 
     def _on_action_triggered(self, cmd: str):
+        """
+        Trigger the callback function for the given command.
+        :param cmd: Command name.(e.g., "open_menu")
+        :return:
+        """
         logger.debug("Action triggered: %s", cmd)
         cb = self._callbacks.get(cmd)
         if cb:
@@ -83,6 +116,12 @@ class ShortcutManager:
             )
 
     def add_callback(self, command_name: str, callback: Callable):
+        """
+        Add a callback function for a shortcut.
+        :param command_name: Command name( e.g., "open_menu).
+        :param callback: Callback function. (e.g., self.open_menu)
+        :return:
+        """
         if command_name not in self._actions:
             raise KeyError(f"Command '{command_name}' not found in registered actions.")
         self._callbacks[command_name] = callback
