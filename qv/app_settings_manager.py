@@ -33,7 +33,7 @@ class ViewConfig:
 @dataclass
 class AppSettingsData:
     general: GeneralConfig = field(default_factory=GeneralConfig)
-    view: ViewConfig = field(default_factory=ViewConfig())
+    view: ViewConfig = field(default_factory=ViewConfig)
 
 # ----------------------
 # Utility
