@@ -4,7 +4,7 @@ import json
 import logging
 
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Optional, Protocol
 from PySide6.QtWidgets import QMainWindow, QMenuBar, QMenu
 from PySide6.QtGui import QKeySequence, QAction
 from PySide6.QtCore import QSettings
@@ -13,6 +13,11 @@ from qv.ui.error_notifier import ErrorNotifier
 
 
 logger = logging.getLogger(__name__)
+
+
+class SettingsProtocol(Protocol):
+    @property
+    def dev_mode(self) -> bool: ...
 
 
 class ShortcutManager:
@@ -33,36 +38,42 @@ class ShortcutManager:
     - ShortcutManager will read the default settings from the file and override them
     with user-defined shortcuts.
     """
-    def __init__(self, parent: QMainWindow, config_path: Path):
+    def __init__(self, parent: QMainWindow, config_path: Path, settings_manager: Optional[SettingsProtocol] = None):
         self.parent = parent
         self.config_path = config_path
         self.settings = QSettings("TedApp.org", "QV")
+        self._settings_manager = settings_manager
         self._actions: dict[str, QAction] = {}
         self._callbacks: dict[str, Callable] = {}
-        self._default_shortcuts = self._load_default_config()
+        self._default_shortcuts = self._load_default_shortcut()
         self._load_user_overrides()
         self._register_actions()
 
-        self.dev_mode = str(os.getenv("QV_DEV", "")).lower() in ("1", "true", "yes")
-        logger.debug("ShortcutManager initialized Dev mode: %s", self.dev_mode)
+        logger.debug("ShortcutManager initialized Dev mode: %s", self._settings_manager.dev_mode)
 
 
-    def _load_default_config(self) -> dict[str, str]:
+    def _load_default_shortcut(self) -> dict[str, str]:
         """
-        Load default config from the package.
+        Load the default config from `shortcuts.json`.
         Settings are stored in JSON format.
+        File format example:
+        {
+            "open_menu": "Ctrl+O",
+            "quit": "Ctrl+Q"
+        }
+        :return: dict[str, str]
         """
         try:
-            with open(self.config_path / "settings.json", "r", encoding="utf-8") as f:
-                return json.load(f)
+            with open(self.config_path / "shortcuts.json", "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data if isinstance(data, dict) else {}
         except (FileNotFoundError, json.JSONDecodeError) as e:
-            print(f"[ShortcutManager] Error loading default config file: {e}")
+            print(f"[ShortcutManager] Error loading shortcuts.json: {e}")
             return {}
 
     def _load_user_overrides(self):
         """
         Override default shortcuts with user-defined shortcuts.
-        :return:
         """
         for cmd, default_seq in self._default_shortcuts.items():
             user_seq = self.settings.value(f"shortcuts/{cmd}", default_seq)
@@ -92,7 +103,8 @@ class ShortcutManager:
         if cb:
             func_name = getattr(cb, "__qualname__", repr(cb))
             func_module = getattr(cb, "__module__", "")
-            logger.info("Shortcut triggered: %s -> %s.%s", cmd, func_module, func_name)
+            logger.info("Shortcut triggered: %s -> %s.%s",
+                        cmd, func_module, func_name)
             try:
                 cb()
             except Exception:
@@ -103,7 +115,7 @@ class ShortcutManager:
                     severity="error",
                     dedup_seconds=1.0,
                 )
-                if getattr(self, "dev_mode", False):
+                if self.settings.dev_mode:
                     raise
                 return
         else:

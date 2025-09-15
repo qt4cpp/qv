@@ -9,6 +9,7 @@ from PySide6.QtCore import QEvent
 from vtkmodules.util.numpy_support import vtk_to_numpy
 
 import qv.utils.vtk_helpers as vtk_helpers
+from app_settings_manager import AppSettingsManager
 from qv.utils.log_util import log_io
 from clipping_function import QVVolumeClipper, ClippingInteractorStyle
 from qv.status import STATUS_FIELDS, StatusField
@@ -29,7 +30,9 @@ class VolumeViewer(QtWidgets.QMainWindow):
     def __init__(self, dicom_dir: str | None = None, rotation_factor: float = 0.5) -> None:
         super().__init__()
         config_path = Path(__file__).parent.parent / "settings"
-        self.shortcut_mgr = ShortcutManager(parent=self, config_path=config_path)
+        self._setting_manager = AppSettingsManager()
+        self.shortcut_mgr = ShortcutManager(parent=self, config_path=config_path,
+                                            settings_manager=self._setting_manager)
         self.register_command()
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
