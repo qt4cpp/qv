@@ -4,5 +4,6 @@
   "left_view": "l",
   "right_view": "r",
   "top_view": "h",
-  "bottom_view": "f"
+  "bottom_view": "f",
+  "load_image": "o"
 }

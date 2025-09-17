@@ -100,6 +100,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.shortcut_mgr.add_callback("right_view", self.right_view)
         self.shortcut_mgr.add_callback("top_view", self.top_view)
         self.shortcut_mgr.add_callback("bottom_view", self.bottom_view)
+        self.shortcut_mgr.add_callback("load_image", self.open_menu)
 
     def eventFilter(self, obj, event):
         if obj == self.ui.vtk_widget:

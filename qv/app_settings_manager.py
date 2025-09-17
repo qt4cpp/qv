@@ -123,10 +123,15 @@ class AppSettingsManager:
     # ---------- 内部実装 ---------------
     def _load_effective(self) -> AppSettingsData:
         """DEFAULTS をベースに QSettings の上書きを反映、検証、モデル化"""
-        merged = self._read_from_qsettings(DEFAULTS)
+        merged = self._apply_qsettings_overrides(DEFAULTS)
         return self._make_model_from(merged)
 
-    def _read_from_qsettings(self, base: dict[str, Any]) -> dict[str, Any]:
+    def _apply_qsettings_overrides(self, base: dict[str, Any]) -> dict[str, Any]:
+        """
+        Read the dict based settings and apply QSettings overrides.
+        :param base:
+        :return: apply QSettings overrides
+        """
         # general
         g = dict(base.get("general", {}))
         v = self._settings.value("general/dev_mode", None)
@@ -145,6 +150,11 @@ class AppSettingsManager:
         return {"general": g, "view": vw}
 
     def _make_model_from(self, merged: dict[str, Any]) -> AppSettingsData:
+        """
+        making model from merged dict and returning merged AppSettingsData
+        :param merged:
+        :return: merged AppSettingsData
+        """
         g = merged.get("general", {})
         vw = merged.get("view", {})
         return AppSettingsData(
