@@ -27,7 +27,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
     """Main window for the volume viewer."""
     statusChanged = QtCore.Signal(str, str)
 
-    def __init__(self, dicom_dir: str | None = None, rotation_factor: float = 0.5) -> None:
+    def __init__(self, dicom_dir: str | None = None) -> None:
         super().__init__()
         config_path = Path(__file__).parent.parent / "settings"
         self._setting_manager = AppSettingsManager()
@@ -50,7 +50,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self._right_dragging = False
         self._left_dragging = False
         self._last_pos = QtCore.QPoint()
-        self.rotation_factor = rotation_factor
+        self.rotation_factor = self._setting_manager.rotation_step_deg
 
         # インスタンス毎にステータスを保持できるようにディープコピーをする。
         self.status_fields: dict[str, StatusField] = {

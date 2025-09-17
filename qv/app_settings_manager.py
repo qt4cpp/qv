@@ -14,7 +14,7 @@ DEFAULTS: Dict[str, Any] = {
         "dev_mode": "INFO",  # "DEBUG", "INFO", "WARNING", "ERROR"
     },
     "view": {
-        "rotation_step_deg": 5.0,
+        "rotation_step_deg": 1.0,
     },
 }
 
