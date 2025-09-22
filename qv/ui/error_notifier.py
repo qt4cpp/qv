@@ -19,13 +19,15 @@ class ErrorNotifier(QObject):
     The class operates as a singleton to ensure consistent behavior across an
     application.
 
+    Usage:
+    >>> ErrorNotifier.instance().notify("Error", "Something went wrong")
+    >>> ErrorNotifier.instance().notify("Warning", "Something might be wrong", severity="warning")
+
+
     :ivar _last_shown: A dictionary to store the last time a notification was shown.
     :ivar dev_mode: Indicates whether the application is running in development mode.
     :ivar _suppress_window: A standard dialog window used for suppressing duplicate messages.
 
-    Usage:
-    >>> ErrorNotifier.instance().notify("Error", "Something went wrong")
-    >>> ErrorNotifier.instance().notify("Warning", "Something might be wrong", severity="warning")
     """
     _instance: Optional[ErrorNotifier] = None
 
