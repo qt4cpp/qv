@@ -5,6 +5,8 @@ import queue
 from logging.handlers import QueueHandler, QueueListener, RotatingFileHandler
 from pathlib import Path
 
+from app_settings_manager import AppSettingsManager
+
 
 def default_log_dir(app_name: str) -> Path:
     base = Path.home() / "Library" / "Logs" / app_name
@@ -62,6 +64,17 @@ class LogSystem:
         if qh is None:
             raise RuntimeError("QueueHandler not found.")
 
+        # 後からレベルを変更するための変数
+        self._console_handler = None
+        self._file_handler = None
+
+        root_logger = logging.getLogger()
+        for h in root_logger.handlers:
+            if self._console_handler is None and isinstance(h, logging.StreamHandler):
+                self._console_handler = h
+            if self._file_handler is None and isinstance(h, logging.FileHandler):
+                self._file_handler = h
+
         # ファイル側ハンドラを準備する
         file_settings = cfg["_file_settings"]
         file_handler = RotatingFileHandler(
@@ -75,5 +88,27 @@ class LogSystem:
         self.listener = QueueListener(qh.queue, file_handler, respect_handler_level=True)
         self.listener.start()
 
+    def apply_levels(self, root_level: int, console_level:int | None = None, file_level: int | None = None) -> None:
+        """起動後にログレベルを更新する"""
+        logging.getLogger().setLevel(root_level)
+        if self._console_handler is not None and console_level is not None:
+            self._console_handler.setLevel(console_level)
+        if self._file_handler is not None and file_level is not None:
+            self._file_handler.setLevel(file_level)
+
     def stop(self):
         self.listener.stop()
+
+
+def apply_logging_policy(logs: LogSystem, settings: AppSettingsManager) -> None:
+    """環境に応じて、ログの出力レベルを切り替える"""
+    if getattr(settings, "dev_mode", False):
+        root = logging.DEBUG
+        console = logging.DEBUG
+        file = logging.DEBUG
+    else:
+        root = logging.DEBUG
+        console = logging.INFO
+        file = logging.DEBUG
+
+    logs.apply_levels(root_level=root, console_level=console, file_level=file)

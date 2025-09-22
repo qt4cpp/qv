@@ -56,14 +56,14 @@ def stub_error_notifier(monkeypatch):
 
 @pytest.fixture
 def config_dir(tmp_path: Path):
-    """ settings.json を一時作成 """
+    """ shortcuts.json を一時作成 """
     cfg = tmp_path / "settings"
     cfg.mkdir(parents=True, exist_ok=True)
     defaults = {
         "front_view": "a",
         "back_view": "p",
     }
-    (cfg / "settings.json").write_text(json.dumps(defaults), encoding="utf-8")
+    (cfg / "shortcuts.json").write_text(json.dumps(defaults), encoding="utf-8")
     return cfg
 
 @pytest.fixture
