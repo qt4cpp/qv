@@ -170,7 +170,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
 
         # self.ui.histgram_widget.set_viewing_range(self.window_level-self.window_width / 2,
         #                                    self.window_level+self.window_width / 2)
-        self.ui.histgram_widget.update_viewing_graph(self.volume_property.GetScalarOpacity())
+        self.ui.histgram_widget.update_opacity_curve(self.volume_property.GetScalarOpacity())
         logging.info("Volume loaded: extent=%s spacing=%s origin=%s",
                      image.GetExtent(), image.GetSpacing(), image.GetOrigin())
 
@@ -214,7 +214,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
             return
 
         pwf = self.volume_property.GetScalarOpacity()
-        self.ui.histgram_widget.update_viewing_graph(pwf)
+        self.ui.histgram_widget.update_opacity_curve(pwf)
 
     def adjust_window_level(self, dx: int, dy: int) -> None:
         """

@@ -1,11 +1,22 @@
+import logging
+
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtWidgets import QWidget, QVBoxLayout
 from pyqtgraph import ViewBox
 
+from log_util import log_io
+
+logger = logging.getLogger(__name__)
+
 
 class HistogramWidget(pg.PlotWidget):
-    """Display a histogram of the given data."""
+    """
+    Display a histogram of the given data.
+    -------------
+    - set_data(): Set the data for the histogram.
+     Arguments: data: ndarray, bins: int
+    """
     def __init__(self, parent=None, data: np.ndarray = None):
         super().__init__(parent)
         self.xmin: int = -2048
@@ -30,6 +41,7 @@ class HistogramWidget(pg.PlotWidget):
         if data is not None:
             self.set_data(data)
 
+    @log_io(level=logging.DEBUG)
     def set_data(self, data: np.ndarray, bins: int = 200):
         """
         Set the data for the histogram.
@@ -49,7 +61,7 @@ class HistogramWidget(pg.PlotWidget):
             symbol=None,
         )
 
-    def update_viewing_graph(self, pwf):
+    def update_opacity_curve(self, pwf):
         """
         Update the viewing graph based on the Piecewise function.
         :param pwf: Opacity function.
