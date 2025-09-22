@@ -9,6 +9,24 @@ logger = logging.getLogger(__name__)
 
 
 class ErrorNotifier(QObject):
+    """
+    Manages error notifications and displays them using appropriate UI components.
+
+    This class is used to log and notify the user about errors, warnings, or other
+    information through dialogs, message boxes, or status bars. It provides support
+    for deduplicating frequent notifications within a specified time frame and
+    allows error details or exception information to be detailed in the notification.
+    The class operates as a singleton to ensure consistent behavior across an
+    application.
+
+    :ivar _last_shown: A dictionary to store the last time a notification was shown.
+    :ivar dev_mode: Indicates whether the application is running in development mode.
+    :ivar _suppress_window: A standard dialog window used for suppressing duplicate messages.
+
+    Usage:
+    >>> ErrorNotifier.instance().notify("Error", "Something went wrong")
+    >>> ErrorNotifier.instance().notify("Warning", "Something might be wrong", severity="warning")
+    """
     _instance: Optional[ErrorNotifier] = None
 
     def __init__(self):

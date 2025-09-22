@@ -10,6 +10,7 @@ from PySide6.QtGui import QKeySequence, QAction
 from PySide6.QtCore import QSettings
 
 from qv.ui.error_notifier import ErrorNotifier
+from qv.app_settings_manager import AppSettingsManager
 
 
 logger = logging.getLogger(__name__)
@@ -38,11 +39,13 @@ class ShortcutManager:
     - ShortcutManager will read the default settings from the file and override them
     with user-defined shortcuts.
     """
-    def __init__(self, parent: QMainWindow, config_path: Path, settings_manager: Optional[SettingsProtocol] = None):
+    def __init__(self, parent: QMainWindow, config_path: Path,
+                 settings_manager: Optional[AppSettingsManager] = None):
         self.parent = parent
         self.config_path = config_path
-        self.settings = QSettings("TedApp.org", "QV")
-        self._settings_manager = settings_manager
+        self._shortcut_settings = QSettings("TedApp.org", "QV")
+        self._settings_manager: AppSettingsManager = settings_manager or AppSettingsManager()
+
         self._actions: dict[str, QAction] = {}
         self._callbacks: dict[str, Callable] = {}
         self._default_shortcuts = self._load_default_shortcut()
@@ -76,7 +79,7 @@ class ShortcutManager:
         Override default shortcuts with user-defined shortcuts.
         """
         for cmd, default_seq in self._default_shortcuts.items():
-            user_seq = self.settings.value(f"shortcuts/{cmd}", default_seq)
+            user_seq = self._shortcut_settings.value(f"shortcuts/{cmd}", default_seq)
             if user_seq:
                 self._default_shortcuts[cmd] = user_seq
 
@@ -115,7 +118,7 @@ class ShortcutManager:
                     severity="error",
                     dedup_seconds=1.0,
                 )
-                if self.settings.dev_mode:
+                if self._settings_manager.dev_mode:
                     raise
                 return
         else:
@@ -145,11 +148,11 @@ class ShortcutManager:
         if not action:
             return False
         action.setShortcuts(QKeySequence(new_seq))
-        self.settings.setValue(f"shortcuts/{cmd}", new_seq)
+        self._shortcut_settings.setValue(f"shortcuts/{cmd}", new_seq)
         return True
 
     def reset_to_default(self):
-        self.settings.clear()
+        self._shortcut_settings.clear()
         self._load_user_overrides()
         for cmd, action in self._actions.items():
             action.setShortcut(QKeySequence(self._default_shortcuts[cmd]))
