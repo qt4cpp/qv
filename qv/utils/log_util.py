@@ -1,5 +1,5 @@
 import logging, time, functools
-from typing import Callable
+from typing import Any, Callable
 
 
 logger = logging.getLogger('qv')
@@ -53,3 +53,29 @@ def log_io(level: int = logging.DEBUG, mask: tuple[str, ...] = ()):
             return result
         return wrapper
     return deco
+
+
+def level_from_name(value: Any, default: int = logging.INFO) -> int:
+    """
+    引数の値を logging レベルに正規化して返す
+    無効値や未知の値は default へフォールバックする。
+    """
+    _VALID_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
+
+    if isinstance(value, int):
+        return value
+    elif isinstance(value, str):
+        s = value.strip()
+        if s.isdigit():
+            try:
+                return int(s)
+            except ValueError:
+                return default
+
+        name = s.upper()
+        if name in _VALID_LEVELS:
+            try:
+                return getattr(logging, name)
+            except AttributeError:
+                pass
+    return default

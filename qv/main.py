@@ -17,7 +17,7 @@ from shortcut_manager import ShortcutManager
 from ui.ui_mainwindow import Ui_MainWindow
 from volumeviewer_interactor_style import VolumeViewerInteractorStyle
 from vtk_helpers import return_dicom_dir
-from logging_setup import LogSystem
+from logging_setup import LogSystem, apply_logging_policy
 
 
 logger = logging.getLogger(__name__)
@@ -27,12 +27,12 @@ class VolumeViewer(QtWidgets.QMainWindow):
     """Main window for the volume viewer."""
     statusChanged = QtCore.Signal(str, str)
 
-    def __init__(self, dicom_dir: str | None = None) -> None:
+    def __init__(self, dicom_dir: str | None = None, settings_manager: AppSettingsManager | None = None) -> None:
         super().__init__()
         config_path = Path(__file__).parent.parent / "settings"
-        self._setting_manager = AppSettingsManager()
+        self.setting = settings_manager or AppSettingsManager()
         self.shortcut_mgr = ShortcutManager(parent=self, config_path=config_path,
-                                            settings_manager=self._setting_manager)
+                                            settings_manager=self.setting)
         self.register_command()
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
@@ -50,7 +50,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self._right_dragging = False
         self._left_dragging = False
         self._last_pos = QtCore.QPoint()
-        self.rotation_factor = self._setting_manager.rotation_step_deg
+        self.rotation_factor = self.setting.rotation_step_deg
 
         # インスタンス毎にステータスを保持できるようにディープコピーをする。
         self.status_fields: dict[str, StatusField] = {
@@ -533,7 +533,9 @@ def main():
     # viewer = VolumeViewer(dicom_dir)
     # 暫定的に自動的にDICOM画像を読み込むようにする。
     logger.info("App start")
-    viewer = VolumeViewer(return_dicom_dir())
+    settings_mgr = AppSettingsManager()
+    apply_logging_policy(logs, settings_mgr)
+    viewer = VolumeViewer(return_dicom_dir(), settings_mgr)
 
     # Qt 終了次にログを確実に止める
     app.aboutToQuit.connect(logs.stop)

@@ -11,7 +11,8 @@ logger = logging.getLogger(__name__)
 # ----------------------
 DEFAULTS: Dict[str, Any] = {
     "general": {
-        "dev_mode": "INFO",  # "DEBUG", "INFO", "WARNING", "ERROR"
+        "dev_mode": False,
+        "logging_level": "INFO",  # "DEBUG", "INFO", "WARNING", "ERROR"
     },
     "view": {
         "rotation_step_deg": 1.0,
