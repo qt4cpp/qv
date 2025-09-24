@@ -1,17 +1,30 @@
 from __future__ import annotations
 from dataclasses import dataclass, asdict, field
+from enum import Enum
 from typing import Any, Dict
 from PySide6.QtCore import QSettings
 import logging
 
 logger = logging.getLogger(__name__)
 
+
+class RunMode(str, Enum):
+    DEVELOPMENT = "development"
+    PRODUCTION = "production"
+    VERBOSE = "verbose"
+
+    def __str__(self):
+        return self.value
+    def __repr__(self):
+        return self.value
+
+
 # ----------------------
 # デフォルト設定
 # ----------------------
 DEFAULTS: Dict[str, Any] = {
     "general": {
-        "dev_mode": False,
+        "run_mode": RunMode.DEVELOPMENT.value,
         "logging_level": "INFO",  # "DEBUG", "INFO", "WARNING", "ERROR"
     },
     "view": {
@@ -24,7 +37,7 @@ DEFAULTS: Dict[str, Any] = {
 # ---------------------
 @dataclass
 class GeneralConfig:
-    dev_mode: bool = False
+    run_mode: RunMode = RunMode.PRODUCTION
     logging_level: str = "INFO"
 
 @dataclass
@@ -41,6 +54,16 @@ class AppSettingsData:
 # ----------------------
 def _truthy(s: str) -> bool:
     return s.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _validate_run_mode(v: Any) -> RunMode:
+    if isinstance(v, RunMode):
+        return v
+    mode = str(v).strip().lower()
+    try:
+        return RunMode(mode)
+    except ValueError:
+        return RunMode(DEFAULTS["general"]["run_mode"])
 
 def _validate_logging_level(v: str) -> str:
     v = str(v).upper()
@@ -74,8 +97,13 @@ class AppSettingsManager:
         return self._data
 
     @property
+    def run_mode(self) -> RunMode:
+        return self._data.general.run_mode
+
+    @property
     def dev_mode(self) -> bool:
-        return self._data.general.dev_mode
+        """Backward compatible boolean view of the run mode."""
+        return self.run_mode is RunMode.DEVELOPMENT
 
     @property
     def logging_level(self) -> str:
@@ -86,10 +114,14 @@ class AppSettingsManager:
         return self._data.view.rotation_step_deg
 
     # 書き込み
+    def set_run_mode(self, v: str | RunMode) -> None:
+        mode = _validate_run_mode(v)
+        self._settings.setValue("general/run_mode", mode.value)
+        self._data.general.run_mode = mode
+
     def set_dev_mode(self, v: bool) -> None:
-        val = bool(v)
-        self._settings.setValue("general/dev_mode", "true" if val else "false")
-        self._data.general.dev_mode = val
+        """Compatibility shim for legacy callers."""
+        self.set_run_mode(RunMode.DEVELOPMENT if v else RunMode.PRODUCTION)
 
     def set_logging_level(self, v: str) -> None:
         level = _validate_logging_level(v)
@@ -116,10 +148,12 @@ class AppSettingsManager:
         self._data = self._load_effective()
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data = {
             "general": asdict(self._data.general),
             "view": asdict(self._data.view),
         }
+        data["general"]["run_mode"] = self._data.general.run_mode.value
+        return data
 
     # ---------- 内部実装 ---------------
     def _load_effective(self) -> AppSettingsData:
@@ -135,9 +169,15 @@ class AppSettingsManager:
         """
         # general
         g = dict(base.get("general", {}))
-        v = self._settings.value("general/dev_mode", None)
+        v = self._settings.value("general/run_mode", None)
         if v is not None:
-            g["dev_mode"] = _truthy(str(v))
+            g["run_mode"] = _validate_run_mode(v).value
+        else:
+            legacy = self._settings.value("general/dev_mode", None)
+            if legacy is not None:
+                g["run_mode"] = (
+                    RunMode.DEVELOPMENT.value if _truthy(str(legacy)) else RunMode.PRODUCTION.value
+                )
         v = self._settings.value("general/logging_level", None)
         if v is not None:
             g["logging_level"] = _validate_logging_level(v)
@@ -160,8 +200,8 @@ class AppSettingsManager:
         vw = merged.get("view", {})
         return AppSettingsData(
             general=GeneralConfig(
-                dev_mode=bool(g.get("dev_mode", DEFAULTS["general"]["dev_mode"])),
-                logging_level=_validate_logging_level(g.get("logging_level", DEFAULTS["general"]["dev_mode"])),
+                run_mode=_validate_run_mode(g.get("run_mode", DEFAULTS["general"]["run_mode"])),
+                logging_level=_validate_logging_level(g.get("logging_level", DEFAULTS["general"]["logging_level"])),
             ),
             view=ViewConfig(
                 rotation_step_deg=_validate_rotation_step(vw.get("rotation_step_deg", DEFAULTS["view"]["rotation_step_deg"]))

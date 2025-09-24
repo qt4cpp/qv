@@ -100,10 +100,11 @@ def test_unregistered_shortcut_notifier(qapp, tmp_settings, config_dir, main_win
     assert "not registered" in note["msg"]
 
 
-def test_dev_mode_raises_after_notify(qapp, tmp_settings, config_dir, main_window, monkeypatch):
-    """開発モードのテスト"""
-    monkeypatch.setenv("QV_DEV", "1")
-    mgr = sm.ShortcutManager(main_window, config_dir)
+def test_development_mode_raises_after_notify(qapp, tmp_settings, config_dir, main_window):
+    """開発モードでは例外を再送出する"""
+    settings_manager = sm.AppSettingsManager()
+    settings_manager.set_run_mode("development")
+    mgr = sm.ShortcutManager(main_window, config_dir, settings_manager=settings_manager)
 
     def bad():
         raise RuntimeError("boom")
@@ -116,10 +117,11 @@ def test_dev_mode_raises_after_notify(qapp, tmp_settings, config_dir, main_windo
     assert "エラー" in StubNotifier.calls[0]["title"] or "Error" in StubNotifier.calls[0]["title"]
 
 
-def test_prod_mode_swallows_and_continues(qapp, tmp_settings, config_dir, main_window, monkeypatch):
-    """本番モードでのテスト"""
-    monkeypatch.delenv("QV_DEV", raising=False)
-    mgr = sm.ShortcutManager(main_window, config_dir)
+def test_production_mode_swallows_and_continues(qapp, tmp_settings, config_dir, main_window):
+    """本番モードでは例外を握りつぶして継続する"""
+    settings_manager = sm.AppSettingsManager()
+    settings_manager.set_run_mode("production")
+    mgr = sm.ShortcutManager(main_window, config_dir, settings_manager=settings_manager)
 
     def bad():
         raise ValueError("bad")

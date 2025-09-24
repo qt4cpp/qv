@@ -4,6 +4,8 @@ from typing import Optional
 from PySide6.QtWidgets import QApplication, QMessageBox, QErrorMessage
 from PySide6.QtCore import QObject, QTimer, Qt
 
+from app_settings_manager import AppSettingsManager
+
 
 logger = logging.getLogger(__name__)
 
@@ -25,15 +27,15 @@ class ErrorNotifier(QObject):
 
 
     :ivar _last_shown: A dictionary to store the last time a notification was shown.
-    :ivar dev_mode: Indicates whether the application is running in development mode.
+    :ivar run_mode: Indicates whether the application is running in development or production mode.
     :ivar _suppress_window: A standard dialog window used for suppressing duplicate messages.
 
     """
     _instance: Optional[ErrorNotifier] = None
 
-    def __init__(self):
+    def __init__(self, settings: AppSettingsManager | None = None):
         super().__init__()
-        self.dev_mode = str(os.getenv("QV_DEV", "")).lower() in ("1", "true", "yes")
+        self._settings = settings or AppSettingsManager()
         self._last_shown: dict[str, float] = {}  # msg -> timestamp
         self._suppress_window = QErrorMessage()  # 重複抑制に強い標準にダイアログ
 
@@ -42,6 +44,13 @@ class ErrorNotifier(QObject):
         if cls._instance is None:
             cls._instance = ErrorNotifier()
         return cls._instance
+
+    @classmethod
+    def configure(cls, settings: AppSettingsManager):
+        if cls._instance is not None:
+            cls._instance._settings = settings
+        else:
+            cls._instance = ErrorNotifier(settings)
 
     def notify(self,
                title: str,
@@ -84,7 +93,7 @@ class ErrorNotifier(QObject):
                     det = "".join(traceback.format_exception(*exc_info))
                 if det:
                     box.setDetailedText(det)
-                    if self.dev_mode:
+                    if self._settings.dev_mode:
                         box.setTextInteractionFlags(Qt.TextSelectableByMouse)
                 box.exec()
             elif severity == "warning":

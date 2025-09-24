@@ -10,7 +10,7 @@ from PySide6.QtGui import QKeySequence, QAction
 from PySide6.QtCore import QSettings
 
 from qv.ui.error_notifier import ErrorNotifier
-from qv.app_settings_manager import AppSettingsManager
+from qv.app_settings_manager import AppSettingsManager, RunMode
 
 
 logger = logging.getLogger(__name__)
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 class SettingsProtocol(Protocol):
     @property
-    def dev_mode(self) -> bool: ...
+    def run_mode(self) -> RunMode: ...
 
 
 class ShortcutManager:
@@ -27,7 +27,7 @@ class ShortcutManager:
     -------------------------
     This manager now reads two kinds of settings.
     1) `shortcuts.json` (package default) + user overrides in QSettings under `shortcuts/*`.
-    2) `settings.json` (package default) for general app settings(e.g., dev_mode)
+    2) `settings.json` (package default) for general app settings (e.g., run_mode)
        User overrides for general
     add_callback: Add a callback function for a shortcut.
     update_shortcut: Update the shortcut for a command.
@@ -52,7 +52,10 @@ class ShortcutManager:
         self._load_user_overrides()
         self._register_actions()
 
-        logger.debug("ShortcutManager initialized Dev mode: %s", self._settings_manager.dev_mode)
+        logger.debug(
+            "ShortcutManager initialized run mode: %s",
+            self._settings_manager.run_mode.value,
+        )
 
 
     def _load_default_shortcut(self) -> dict[str, str]:
