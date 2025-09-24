@@ -14,10 +14,13 @@ from qv.utils.log_util import log_io
 from clipping_function import QVVolumeClipper, ClippingInteractorStyle
 from qv.status import STATUS_FIELDS, StatusField
 from shortcut_manager import ShortcutManager
+from ui.error_notifier import ErrorNotifier
 from ui.ui_mainwindow import Ui_MainWindow
 from volumeviewer_interactor_style import VolumeViewerInteractorStyle
 from vtk_helpers import return_dicom_dir
 from logging_setup import LogSystem, apply_logging_policy
+
+from qv.ui.error_notifier import ErrorNotifier
 
 
 logger = logging.getLogger(__name__)
@@ -535,6 +538,7 @@ def main():
     logger.info("App start")
     settings_mgr = AppSettingsManager()
     apply_logging_policy(logs, settings_mgr)
+    ErrorNotifier.configure(settings_mgr)
     viewer = VolumeViewer(return_dicom_dir(), settings_mgr)
 
     # Qt 終了次にログを確実に止める

@@ -5,7 +5,7 @@ import queue
 from logging.handlers import QueueHandler, QueueListener, RotatingFileHandler
 from pathlib import Path
 
-from app_settings_manager import AppSettingsManager
+from app_settings_manager import AppSettingsManager, RunMode
 
 
 def default_log_dir(app_name: str) -> Path:
@@ -22,7 +22,6 @@ def build_config(app_name: str, level: str = None, log_dir: Path | None = None) 
 
     fmt = "%(asctime)s.%(msecs)03dZ %(levelname)s %(process)d %(threadName)s %(name)s %(message)s"
     datefmt = "%Y-%m-%dT%H:%M:%S"
-    print(level)
     return {
         "version": 1,
         "disable_existing_loggers": False,
@@ -102,7 +101,11 @@ class LogSystem:
 
 def apply_logging_policy(logs: LogSystem, settings: AppSettingsManager) -> None:
     """環境に応じて、ログの出力レベルを切り替える"""
-    if getattr(settings, "dev_mode", False):
+    mode = getattr(settings, "run_mode", None)
+    if mode is None:
+        mode = RunMode.DEVELOPMENT if getattr(settings, "dev_mode", False) else RunMode.PRODUCTION
+
+    if mode == RunMode.DEVELOPMENT or mode == RunMode.VERBOSE:
         root = logging.DEBUG
         console = logging.DEBUG
         file = logging.DEBUG
