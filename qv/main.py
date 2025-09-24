@@ -20,7 +20,6 @@ from volumeviewer_interactor_style import VolumeViewerInteractorStyle
 from vtk_helpers import return_dicom_dir
 from logging_setup import LogSystem, apply_logging_policy
 
-from qv.ui.error_notifier import ErrorNotifier
 
 
 logger = logging.getLogger(__name__)
