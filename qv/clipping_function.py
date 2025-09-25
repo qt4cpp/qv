@@ -36,8 +36,8 @@ class ClippingInteractorStyle(vtk.vtkInteractorStyleTrackballCamera):
         """マウスが左クリックされた点を3D座標で受け取り、viewer 経由でClipperに渡す"""
         x, y = self.GetInteractor().GetEventPosition()
         self.picker.Pick(x, y, 0, self.viewer.renderer)
-        pt = self.picker.GetPickPosition()
-        self.viewer.add_clip_point(pt)
+        world_pt = self.picker.GetPickPosition()
+        self.viewer.add_clip_point((float(x), float(y)), world_pt)
 
     def OnLeftButtonDoubleClick(self, caller, event):
         """ダブルクリックでクリッピングする領域を閉じる"""
@@ -52,7 +52,10 @@ class QVVolumeClipper:
     """
     def __init__(self, viewer: "VolumeViewer"):
         self.viewer = viewer
-        self.clip_points = []  # ユーザーが打った点
+        self.clip_points_display: list[tuple[float, float]] = []  # Screen coordinates
+        self.clip_points_world: list[tuple[float, float, float]] = []  # Screened cache
+        self.reference_depth: float | None = None
+
         self.backup_image = None
 
         self.mapper = vtk.vtkGPUVolumeRayCastMapper()
@@ -119,10 +122,93 @@ class QVVolumeClipper:
 
         return mask_img
 
+    def add_point(self, display_xy: tuple[float, float],
+                  world_pt: tuple[float, float, float]) -> None:
+        """スクリーン座標でクリッピング点を保存し、参照深度を確定する"""
+        self._ensure_reference(world_pt)
+        self.clip_points_display.append(display_xy)
+        self.invalidate_projection()
 
-    def add_point(self, pt):
-        """Add a clipping point."""
-        self.clip_points.append(pt)
+    def has_points(self) -> bool:
+        return bool(self.clip_points_display)
+
+    def invalidate_projection(self) -> None:
+        self.clip_points_world.clear()
+
+    def _ensure_reference(self, world_pt: tuple[float, float, float]) -> None:
+        if self.reference_depth is not None:
+            return
+
+        cam = self.viewer.renderer.GetActiveCamera()
+        cam_pos = cam.GetPosition()
+        fp = cam.GetFocalPoint()
+        view_vec = vtk_helpers.direction_vector(cam_pos, fp)
+        norm = vtk_helpers.calculate_norm(view_vec)
+        if norm == 0:
+            self.reference_depth = 0.0
+            return
+        view_dir = [v / norm for v in view_vec]
+        cam_to_point = vtk_helpers.direction_vector(cam_pos, world_pt)
+        depth = sum(cam_to_point[i] * view_dir[i] for i in range(3))
+        if depth <= 0:
+            depth = vtk_helpers.calculate_norm(view_vec)
+        self.reference_depth = depth
+
+    def _project_display_points(self) -> list[tuple[float, float, float]]:
+        if not self.clip_points_display:
+            self.clip_points_world.clear()
+            return []
+
+        cam = self.viewer.renderer.GetActiveCamera()
+        cam_pos = cam.GetPosition()
+        fp = cam.GetFocalPoint()
+        view_vec = vtk_helpers.direction_vector(cam_pos, fp)
+        norm = vtk_helpers.calculate_norm(view_vec)
+        if norm == 0:
+            return []
+        view_dir =[v / norm for v in view_vec]
+
+        depth = self.reference_depth
+        if depth is None:
+            depth = vtk_helpers.calculate_norm(view_vec)
+            self.reference_depth = depth
+
+        plane_point = [cam_pos[i] + view_dir[i] * depth for i in range(3)]
+        renderer = self.viewer.renderer
+        projected: list[tuple[float, float, float]] = []
+
+        for x, y in self.clip_points_display:
+            renderer.SetDisplayPoint(x, y, 0.0)
+            renderer.DisplayToWorld()
+            near4 = renderer.GetWorldPoint()
+            if near4[3] == 0:
+                continue
+            near = [near4[i] / near4[3] for i in range(3)]
+
+            renderer.SetDisplayPoint(x, y, 1.0)
+            renderer.DisplayToWorld()
+            far4 = renderer.GetWorldPoint()
+            if far4[3] == 0:
+                continue
+            far = [far4[i] / far4[3] for i in range(3)]
+
+            ray_dir = [far[i] - near[i] for i in range(3)]
+            denom = sum(ray_dir[i] * view_dir[i] for i in range(3))
+            if abs(denom) < 1e-6:
+                projected.append(tuple(near))
+                continue
+
+            t = sum((plane_point[i] - near[i]) * view_dir[i] for i in range(3)) / denom
+            pt3d = [near[i] + t * ray_dir[i] for i in range(3)]
+            projected.append(tuple(pt3d))
+
+        self.clip_points_world = projected
+        return projected
+
+    def get_projected_points(self) -> list[tuple[float, float, float]]:
+        if not self.clip_points_world:
+            self._project_display_points()
+        return list(self.clip_points_world)
 
     @log_io(level=logging.INFO)
     def finalize_clip(self):
@@ -136,8 +222,8 @@ class QVVolumeClipper:
             return
 
         # クリップ点は最低3点必要（ループ）
-        if len(self.clip_points) < 3:
-            logging.info(f"[Clip] Need at least 3 points to form a loop. Got {len(self.clip_points)}.")
+        if len(self.clip_points_display) < 3:
+            logging.info(f"[Clip] Need at least 3 points to form a loop. Got {len(self.clip_points_display)}.")
             self.backup_image = None
             self.clip_loop = None
             return
@@ -159,13 +245,16 @@ class QVVolumeClipper:
             return
         view_vec = [v / norm for v in view_vec]
 
-        # カメラの視線ベクトルに沿って、各店フォーカルポイントに垂直な平面へ正射影する
+        world_points = self._project_display_points()
+        if len(world_points) < 3:
+            logging.info("[Clip] Projected points are insufficeint to build a loop.")
+            self.backup_image = None
+            self.clip_loop = None
+            return
+
         vtk_points = vtk.vtkPoints()
-        for pt in self.clip_points:
-            vec_fp = vtk_helpers.direction_vector(pt, fp)
-            d = sum(vec_fp[i] * view_vec[i] for i in range(3))
-            proj_pt = [pt[i] - d * view_vec[i] for i in range(3)]
-            vtk_points.InsertNextPoint(proj_pt)
+        for pt in world_points:
+            vtk_points.InsertNextPoint(*pt)
 
         # ImplicitSelectionLoop を作成
         self.clip_loop = vtk.vtkImplicitSelectionLoop()
@@ -203,7 +292,7 @@ class QVVolumeClipper:
         self.preview_extrude_actor.GetProperty().SetColor(0.5, 0.6, 0)
         self.preview_extrude_actor.GetProperty().SetOpacity(1.0)
 
-        logging.info("[Finalize] clip_points=%s", len(self.clip_points))
+        logging.info("[Finalize] clip_points=%s", len(world_points))
         logging.info("[Finalize] image_extent=%s", self.backup_image.GetExtent())
         logging.info("[Finalize] camera_fp=%s view_vec=%s", fp, view_vec)
 
@@ -311,7 +400,9 @@ class QVVolumeClipper:
         # 内部状態をクリア
         self.backup_image = None
         self.clip_loop = None
-        self.clip_points.clear()
+        self.clip_points_display.clear()
+        self.clip_points_world.clear()
+        self.reference_depth = None
 
         # viewer 側の可視化もリセット
         if hasattr(self.viewer, "clipping_points"):

@@ -1,5 +1,6 @@
 import copy
 import logging
+import math
 import sys
 from pathlib import Path
 
@@ -82,11 +83,17 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.clipper_mapper = vtk.vtkPolyDataMapper()
         self.clipper_mapper.SetInputData(self.clipper_polydata)
         self.clipper_actor.SetMapper(self.clipper_mapper)
-        self.clipper_actor.GetProperty().SetColor(1, 1, 0)
-        self.clipper_actor.GetProperty().SetLineWidth(5)
-        self.clipper_actor.GetProperty().SetOpacity(0.5)
+        prop = self.clipper_actor.GetProperty()
+        prop.SetColor(1, 1, 0)
+        prop.SetLineWidth(3)
+        prop.SetOpacity(1.0)
+        prop.SetRenderLinesAsTubes(True)
+        prop.RenderPointsAsSpheresOn()
+        prop.SetPointSize(6)
         self.renderer.AddActor(self.clipper_actor)
-        self.clipping_points = []
+        self._clipper_overlay_observer = self.interactor.AddObserver(
+            "EndInteractionEvent", self._on_camera_interaction
+        )
 
         self.ui.apply_clip_button.clicked.connect(self.apply_clipping)
         self.ui.cancel_clip_button.clicked.connect(self.cancel_clipping)
@@ -494,26 +501,63 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.interactor.SetInteractorStyle(self._default_interactor_style)
         self.ui.clip_button_widget.hide()
 
-    def add_clip_point(self, pt: tuple[float, float, float]):
-        self.clipper.add_point(pt)
-        self.clipping_points.append(pt)
+    def add_clip_point(self, display_xy: tuple[float, float], world_pt: tuple[float, float, float]) -> None:
+        self.clipper.add_point(display_xy, world_pt)
         self.update_clipper_visualization()
 
+    def _on_camera_interaction(self, *_):
+        if self.clipper.has_points():
+            self.clipper.invalidate_projection()
+            self.update_clipper_visualization()
+
     def update_clipper_visualization(self):
+        world_points = self.clipper.get_projected_points()
+        if not world_points:
+            self.clipper_polydata.Initialize()
+            self.ui.vtk_widget.GetRenderWindow().Render()
+            return
+
+        cam = self.renderer.GetActiveCamera()
+        cam_pos = cam.GetPosition()
+        bounds = self.renderer.ComputeVisiblePropBounds()
+        diag = math.sqrt(sum((bounds[2 * i + 1] - bounds[2 * i])**2 for i in range(3))) or 1.0
+        offset = 0.002 * diag
+
         points = vtk.vtkPoints()
+        verts = vtk.vtkCellArray()
         lines = vtk.vtkCellArray()
-        n = len(self.clipping_points)
-        for i, pt in enumerate(self.clipping_points):
-            points.InsertNextPoint(pt)
+
+        n = len(world_points)
+        for i, pt in enumerate(world_points):
+            to_cam = [cam_pos[j] - pt[j] for j in range(3)]
+            length = vtk_helpers.calculate_norm(to_cam)
+            if length:
+                disp_pt = [pt[j] + to_cam[j] / length * offset for j in range(3)]
+            else:
+                disp_pt = pt
+            points.InsertNextPoint(*disp_pt)
+
+            verts.InsertNextCell(1)
+            verts.InsertCellPoint(i)
+
             if i > 0:
                 lines.InsertNextCell(2)
                 lines.InsertCellPoint(i - 1)
                 lines.InsertCellPoint(i)
-        if n >= 3:
+
+        if n == 1:
+            lines.InsertNextCell(2)
+            lines.InsertCellPoint(0)
+            lines.InsertCellPoint(0)
+        elif n == 2:
+            pass
+        elif n >= 3:
             lines.InsertNextCell(2)
             lines.InsertCellPoint(n - 1)
             lines.InsertCellPoint(0)
+
         self.clipper_polydata.SetPoints(points)
+        self.clipper_polydata.SetVerts(verts)
         self.clipper_polydata.SetLines(lines)
         self.ui.vtk_widget.GetRenderWindow().Render()
 
