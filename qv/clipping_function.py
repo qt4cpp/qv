@@ -234,6 +234,8 @@ class QVVolumeClipper:
         # ImplicitSelectionLoop を作成
         self.clip_loop = vtk.vtkImplicitSelectionLoop()
         self.clip_loop.SetLoop(vtk_points)
+        self.clip_loop.SetNormal(*view_vec)  # 投影法線を明示的に設定して平行にする
+        self.clip_loop.AutomaticNormalGenerationOff()  # 自動法線計算を無効化する。
 
         # -------------- 3D Preview -----------------
         # backup_image はここまでで必ず存在している前提
