@@ -89,3 +89,31 @@ def direction_vector(start_point: tuple[float, float, float],
 def calculate_norm(vector: tuple[float, float, float]) -> float:
     """Calculate the norm of a vector."""
     return np.sqrt(vector[0] ** 2 + vector[1] ** 2 + vector[2] ** 2)
+
+
+def get_camera_and_view_direction(
+        source: vtk.vtkRenderer | vtk.vtkCamera
+) -> tuple[vtk.vtkCamera, list[float, float, float], float] | None:
+    """
+    Return the camera, normalized view vector, and its norm.
+
+    Accepts either a renderer (uses its active camera) or a camera directly;
+    returns ``None`` when no camera is available or the view vector has zero
+    length.
+    """
+    if isinstance(source, vtk.vtkRenderer):
+        camera = source.GetActiveCamera()
+    else:
+        camera = source
+
+    if camera is None:
+        return None
+
+    focal_point = camera.GetFocalPoint()
+    view_vec = direction_vector(camera.GetPosition(), focal_point)
+    norm = calculate_norm(view_vec)
+    if norm == 0:
+        return None
+
+    view_dir = [component / norm for component in view_vec]
+    return camera, view_dir, norm
