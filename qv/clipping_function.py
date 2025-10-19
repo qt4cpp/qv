@@ -1,7 +1,7 @@
 import logging
 
 import vtk
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Sequence
 
 from vtkmodules.vtkCommonDataModel import vtkImplicitSelectionLoop
 from vtkmodules.vtkImagingStencil import vtkImplicitFunctionToImageStencil
@@ -9,6 +9,7 @@ from vtkmodules.vtkRenderingCore import vtkActor
 
 import vtk_helpers
 from log_util import log_io
+from qv.region_selection import RegionSelectionController
 
 if TYPE_CHECKING:
     # 型チェック時のみインポートする
@@ -41,8 +42,7 @@ class ClippingInteractorStyle(vtk.vtkInteractorStyleTrackballCamera):
 
     def OnLeftButtonDoubleClick(self, caller, event):
         """ダブルクリックでクリッピングする領域を閉じる"""
-        self.viewer.clipper.finalize_clip()
-        self.viewer.enter_clip_result_mode()
+        self.viewer.clipper.complete_selection()
 
 
 class QVVolumeClipper:
@@ -50,18 +50,27 @@ class QVVolumeClipper:
     Add function to clip the volume for QV.
     This class has a response to the clipping function.
     """
-    def __init__(self, viewer: "VolumeViewer"):
+    def __init__(self, viewer: "VolumeViewer", overlay_renderer: vtk.vtkRenderer):
         self.viewer = viewer
-        self.clip_points_display: list[tuple[float, float]] = []  # Screen coordinates
-        self.clip_points_world: list[tuple[float, float, float]] = []  # Screened cache
-        self.reference_depth: float | None = None
+        self.overlay_renderer = overlay_renderer
+
+        self.clip_points_display: list[tuple[float, float]] = []
+        self.clip_points_world: list[tuple[float, float, float]] = []
 
         self.backup_image = None
 
         self.mapper = vtk.vtkGPUVolumeRayCastMapper()
-        self.clip_loop: vtkImplicitSelectionLoop | None = None  # vtkImplicitSelectionLoop
+        self.clip_loop: vtkImplicitSelectionLoop | None = None
         self.stenciler: vtkImplicitFunctionToImageStencil | None = None
         self.preview_extrude_actor: vtkActor | None = None
+
+        self.selection_active = False
+        self.region_selection = RegionSelectionController(
+            viewer.ui.vtk_widget.GetRenderWindow(),
+            viewer.renderer,
+            overlay_renderer,
+        )
+        self.region_selection.set_closed_callback(self._on_region_closed)
 
     def _get_current_image_from_viewer(self) -> vtk.vtkImageData | None:
         """viewer.volume から現在の vtkImageData を取得。取得できなければ None。"""
@@ -122,93 +131,59 @@ class QVVolumeClipper:
 
         return mask_img
 
-    def add_point(self, display_xy: tuple[float, float],
-                  world_pt: tuple[float, float, float]) -> None:
-        """スクリーン座標でクリッピング点を保存し、参照深度を確定する"""
-        self._ensure_reference(world_pt)
-        self.clip_points_display.append(display_xy)
-        self.invalidate_projection()
+    def start_region_selection(self) -> None:
+        self.reset()
+        self.selection_active = True
+        self.region_selection.enable()
 
-    def has_points(self) -> bool:
-        return bool(self.clip_points_display)
+    def stop_region_selection(self) -> None:
+        if self.region_selection.is_enabled():
+            self.region_selection.disable()
+        self.selection_active = False
 
-    def invalidate_projection(self) -> None:
-        self.clip_points_world.clear()
-
-    def _ensure_reference(self, world_pt: tuple[float, float, float]) -> None:
-        if self.reference_depth is not None:
+    def add_selection_point(self, display_xy: tuple[float, float],
+                            world_pt: tuple[float, float, float]) -> None:
+        if not self.selection_active:
             return
+        self.region_selection.add_display_point(display_xy[0], display_xy[1], world_pt)
 
-        cam = self.viewer.renderer.GetActiveCamera()
-        cam_pos = cam.GetPosition()
-        fp = cam.GetFocalPoint()
-        view_vec = vtk_helpers.direction_vector(cam_pos, fp)
-        norm = vtk_helpers.calculate_norm(view_vec)
-        if norm == 0:
-            self.reference_depth = 0.0
+    def complete_selection(self) -> None:
+        if not self.selection_active:
             return
-        view_dir = [v / norm for v in view_vec]
-        cam_to_point = vtk_helpers.direction_vector(cam_pos, world_pt)
-        depth = sum(cam_to_point[i] * view_dir[i] for i in range(3))
-        if depth <= 0:
-            depth = vtk_helpers.calculate_norm(view_vec)
-        self.reference_depth = depth
+        self.region_selection.complete()
 
-    def _project_display_points(self) -> list[tuple[float, float, float]]:
-        if not self.clip_points_display:
-            self.clip_points_world.clear()
-            return []
+    def on_camera_updated(self) -> None:
+        if self.selection_active:
+            self.viewer.update_clipper_visualization()
 
-        cam = self.viewer.renderer.GetActiveCamera()
-        cam_pos = cam.GetPosition()
-        fp = cam.GetFocalPoint()
-        view_vec = vtk_helpers.direction_vector(cam_pos, fp)
-        norm = vtk_helpers.calculate_norm(view_vec)
-        if norm == 0:
-            return []
-        view_dir =[v / norm for v in view_vec]
-
-        depth = self.reference_depth
-        if depth is None:
-            depth = vtk_helpers.calculate_norm(view_vec)
-            self.reference_depth = depth
-
-        plane_point = [cam_pos[i] + view_dir[i] * depth for i in range(3)]
-        renderer = self.viewer.renderer
-        projected: list[tuple[float, float, float]] = []
-
-        for x, y in self.clip_points_display:
-            renderer.SetDisplayPoint(x, y, 0.0)
-            renderer.DisplayToWorld()
-            near4 = renderer.GetWorldPoint()
-            if near4[3] == 0:
-                continue
-            near = [near4[i] / near4[3] for i in range(3)]
-
-            renderer.SetDisplayPoint(x, y, 1.0)
-            renderer.DisplayToWorld()
-            far4 = renderer.GetWorldPoint()
-            if far4[3] == 0:
-                continue
-            far = [far4[i] / far4[3] for i in range(3)]
-
-            ray_dir = [far[i] - near[i] for i in range(3)]
-            denom = sum(ray_dir[i] * view_dir[i] for i in range(3))
-            if abs(denom) < 1e-6:
-                projected.append(tuple(near))
-                continue
-
-            t = sum((plane_point[i] - near[i]) * view_dir[i] for i in range(3)) / denom
-            pt3d = [near[i] + t * ray_dir[i] for i in range(3)]
-            projected.append(tuple(pt3d))
-
-        self.clip_points_world = projected
-        return projected
-
-    def get_projected_points(self) -> list[tuple[float, float, float]]:
-        if not self.clip_points_world:
-            self._project_display_points()
+    def get_preview_world_points(self) -> list[tuple[float, float, float]]:
+        if self.selection_active:
+            return self.region_selection.get_world_points()
         return list(self.clip_points_world)
+
+    def is_selection_active(self) -> bool:
+        return self.selection_active
+
+    def _on_region_closed(
+        self,
+        display_points: Sequence[tuple[float, float]],
+        world_points: Sequence[tuple[float, float, float]],
+    ) -> None:
+        if len(display_points) < 3 or len(world_points) < 3:
+            self.stop_region_selection()
+            self.reset()
+            return
+
+        self.clip_points_display = list(display_points)
+        self.clip_points_world = list(world_points)
+        self.stop_region_selection()
+        self.viewer.update_clipper_visualization()
+
+        previous_loop = self.clip_loop
+        self.finalize_clip()
+
+        if self.clip_loop is not None and self.clip_loop is not previous_loop:
+            self.viewer.enter_clip_result_mode()
 
     @log_io(level=logging.INFO)
     def finalize_clip(self):
@@ -245,7 +220,7 @@ class QVVolumeClipper:
             return
         view_vec = [v / norm for v in view_vec]
 
-        world_points = self._project_display_points()
+        world_points = list(self.clip_points_world)
         if len(world_points) < 3:
             logging.info("[Clip] Projected points are insufficeint to build a loop.")
             self.backup_image = None
@@ -276,21 +251,37 @@ class QVVolumeClipper:
         lines.InsertCellPoint(0)
         poly.SetLines(lines)
 
-        extrude = vtk.vtkLinearExtrusionFilter()
-        extrude.SetInputData(poly)
-        extrude.SetExtrusionTypeToNormalExtrusion()
-        extrude.SetVector(view_vec)
-        extrude.SetScaleFactor(depth)
-        extrude.CappingOn()
-        extrude.Update()
+        # Extrude selection loop in both view directions for preview volume
+        extrude_forward = vtk.vtkLinearExtrusionFilter()
+        extrude_forward.SetInputData(poly)
+        extrude_forward.SetExtrusionTypeToNormalExtrusion()
+        extrude_forward.SetVector(*view_vec)
+        extrude_forward.SetScaleFactor(depth * 2)
+        extrude_forward.CappingOn()
+        extrude_forward.Update()
+
+        # 手前から奥に押し出す
+        # reverse_view_vec = [-v for v in view_vec]
+        # extrude_backward = vtk.vtkLinearExtrusionFilter()
+        # extrude_backward.SetInputData(poly)
+        # extrude_backward.SetExtrusionTypeToNormalExtrusion()
+        # extrude_backward.SetVector(*reverse_view_vec)
+        # extrude_backward.SetScaleFactor(depth)
+        # extrude_backward.CappingOn()
+        # extrude_backward.Update()
+
+        # combined_preview = vtk.vtkAppendPolyData()
+        # combined_preview.AddInputConnection(extrude_forward.GetOutputPort())
+        # combined_preview.AddInputConnection(extrude_backward.GetOutputPort())
+        # combined_preview.Update()
 
         # Make Preview
         mapper3D = vtk.vtkPolyDataMapper()
-        mapper3D.SetInputConnection(extrude.GetOutputPort())
+        mapper3D.SetInputConnection(extrude_forward.GetOutputPort())
         self.preview_extrude_actor = vtk.vtkActor()
         self.preview_extrude_actor.SetMapper(mapper3D)
         self.preview_extrude_actor.GetProperty().SetColor(0.5, 0.6, 0)
-        self.preview_extrude_actor.GetProperty().SetOpacity(1.0)
+        self.preview_extrude_actor.GetProperty().SetOpacity(0.95)
 
         logging.info("[Finalize] clip_points=%s", len(world_points))
         logging.info("[Finalize] image_extent=%s", self.backup_image.GetExtent())
@@ -398,11 +389,12 @@ class QVVolumeClipper:
             self.preview_extrude_actor = None
 
         # 内部状態をクリア
+        self.stop_region_selection()
         self.backup_image = None
         self.clip_loop = None
         self.clip_points_display.clear()
         self.clip_points_world.clear()
-        self.reference_depth = None
+        self.selection_active = False
 
         # viewer 側の可視化もリセット
         if hasattr(self.viewer, "clipping_points"):

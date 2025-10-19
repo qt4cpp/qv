@@ -30,7 +30,8 @@ class VolumeViewer(QtWidgets.QMainWindow):
     """Main window for the volume viewer."""
     statusChanged = QtCore.Signal(str, str)
 
-    def __init__(self, dicom_dir: str | None = None, settings_manager: AppSettingsManager | None = None) -> None:
+    def __init__(self, dicom_dir: str | None = None,
+                 settings_manager: AppSettingsManager | None = None) -> None:
         super().__init__()
         config_path = Path(__file__).parent.parent / "settings"
         self.setting = settings_manager or AppSettingsManager()
@@ -43,9 +44,23 @@ class VolumeViewer(QtWidgets.QMainWindow):
 
         w = self.ui.vtk_widget
         w.installEventFilter(self)
+        render_window = w.GetRenderWindow()
+
         self.renderer = vtk.vtkRenderer()
-        w.GetRenderWindow().AddRenderer(self.renderer)
-        self.interactor = w.GetRenderWindow().GetInteractor()
+        self.renderer.SetLayer(0)
+        render_window.AddRenderer(self.renderer)
+        render_window.SetNumberOfLayers(2)
+
+        self.overlay_renderer = vtk.vtkRenderer()
+        self.overlay_renderer.SetLayer(1)
+        self.overlay_renderer.SetInteractive(False)
+        if hasattr(self.overlay_renderer, "SetBackgroundAlpha"):
+            self.overlay_renderer.SetBackgroundAlpha(0.0)
+        if hasattr(self.overlay_renderer, "SetUseDepth"):
+            self.overlay_renderer.SetUseDepth(0)
+        render_window.AddRenderer(self.overlay_renderer)
+
+        self.interactor = render_window.GetInteractor()
         self._default_interactor_style = VolumeViewerInteractorStyle(self)
         self.interactor.SetInteractorStyle(self._default_interactor_style)
         self._clipping_interactor_style = ClippingInteractorStyle(self)
@@ -76,7 +91,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.show()
         self.interactor.Initialize()
 
-        self.clipper = QVVolumeClipper(self)
+        self.clipper = QVVolumeClipper(self, self.overlay_renderer)
         # Actor for visualize the clipping region.
         self.clipper_actor = vtk.vtkActor()
         self.clipper_polydata = vtk.vtkPolyData()
@@ -489,29 +504,30 @@ class VolumeViewer(QtWidgets.QMainWindow):
         """Enter clip mode."""
         logging.debug("enter_clip_mode")
         self.interactor.SetInteractorStyle(self._clipping_interactor_style)
+        self.clipper.start_region_selection()
         self.ui.vtk_widget.GetRenderWindow().Render()
         self.ui.clip_button_widget.show()
 
     def enter_clip_result_mode(self):
         """Enter clip result mode to check the result of clipping before applying."""
         self.interactor.SetInteractorStyle(self._default_interactor_style)
+        self.clipper.stop_region_selection()
 
     def exit_clip_mode(self):
         logging.debug("exit_clip_mode")
         self.interactor.SetInteractorStyle(self._default_interactor_style)
+        self.clipper.stop_region_selection()
         self.ui.clip_button_widget.hide()
 
     def add_clip_point(self, display_xy: tuple[float, float], world_pt: tuple[float, float, float]) -> None:
-        self.clipper.add_point(display_xy, world_pt)
+        self.clipper.add_selection_point(display_xy, world_pt)
         self.update_clipper_visualization()
 
     def _on_camera_interaction(self, *_):
-        if self.clipper.has_points():
-            self.clipper.invalidate_projection()
-            self.update_clipper_visualization()
+        self.clipper.on_camera_updated()
 
     def update_clipper_visualization(self):
-        world_points = self.clipper.get_projected_points()
+        world_points = self.clipper.get_preview_world_points()
         if not world_points:
             self.clipper_polydata.Initialize()
             self.ui.vtk_widget.GetRenderWindow().Render()
