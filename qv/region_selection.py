@@ -4,7 +4,11 @@ from typing import Callable, Sequence
 
 import vtk
 
+import logging
 import qv.utils.vtk_helpers as vtk_helpers
+
+
+logger = logging.getLogger(__name__)
 
 
 RegionClosedCallback = Callable[[Sequence[tuple[float, float]],
@@ -27,6 +31,8 @@ class RegionSelectionController:
         world_renderer: vtk.vtkRenderer,
         overlay_renderer: vtk.vtkRenderer,
     ) -> None:
+        logger.debug("initialising region selection controller")
+
         self.render_window = render_window
         self.world_renderer = world_renderer
         self.overlay_renderer = overlay_renderer
@@ -69,6 +75,8 @@ class RegionSelectionController:
         # observer: when camera interaction ends, recompute projection
         self._interactor_observer_id: int | None = None
 
+        logger.debug("initialisation complete")
+
     # ----------------------------------------------------
     # public API
     def set_overlay_property(
@@ -95,6 +103,7 @@ class RegionSelectionController:
             self._interactor_observer_id = interactor.AddObserver(
                 "EndInteractionEvent", self._on_camera_interaction
             )
+        logger.info("region selection enabled")
 
     def disable(self) -> None:
         if not self._enabled:
@@ -104,6 +113,7 @@ class RegionSelectionController:
         if self._interactor_observer_id is not None:
             interactor.RemoveObserver(self._interactor_observer_id)
             self._interactor_observer_id = None
+        logger.info("region selection disabled")
 
     def add_display_point(
         self,
@@ -133,6 +143,7 @@ class RegionSelectionController:
 
     def complete(self) -> None:
         if not self._enabled or len(self.display_points) < 3:
+            logger.debug("region selection complete: not enabled or <3 points")
             return
         
         world_points = self._project_display_points()
@@ -144,6 +155,7 @@ class RegionSelectionController:
 
         self.reset(clear_overlay=True)
         self.render_window.Render()
+        logger.info("region selection complete")
 
     # -------------------------------------------------
     # Internal helpers
@@ -156,6 +168,7 @@ class RegionSelectionController:
             self._clear_overlay()
         else:
             self._update_overlay()
+        logger.debug("region selection reset")
 
     def _invalidate_projection(self) -> None:
         self.world_points.clear()
