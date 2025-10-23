@@ -14,7 +14,7 @@ from qv.region_selection import RegionSelectionController
 if TYPE_CHECKING:
     # 型チェック時のみインポートする
     # 相互参照となってしまう。
-    from main import VolumeViewer
+    from viewer.volume_viewer import VolumeViewer
 
 
 logger = logging.getLogger(__name__)
