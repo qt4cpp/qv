@@ -4,6 +4,8 @@ from typing import Literal, TYPE_CHECKING
 import vtk
 import logging
 
+import vtk_helpers
+
 
 if TYPE_CHECKING:
     from qv.utils import vtk_helpers

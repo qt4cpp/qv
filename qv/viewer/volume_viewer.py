@@ -15,6 +15,7 @@ from clipping_function import QVVolumeClipper, ClippingInteractorStyle
 from qv.status import STATUS_FIELDS, StatusField
 from shortcut_manager import ShortcutManager
 from ui.ui_mainwindow import Ui_MainWindow
+from viewer.camera_controller import CameraController
 from volumeviewer_interactor_style import VolumeViewerInteractorStyle
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,8 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.renderer.SetLayer(0)
         render_window.AddRenderer(self.renderer)
         render_window.SetNumberOfLayers(2)
+
+        self.camera_controller = CameraController(self.renderer.GetActiveCamera(), self.renderer)
 
         self.overlay_renderer = vtk.vtkRenderer()
         self.overlay_renderer.SetLayer(1)
@@ -175,17 +178,22 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.volume.SetProperty(self.volume_property)
 
         self.renderer.AddVolume(self.volume)
-        camera = vtk.vtkCamera()
-        camera.SetClippingRange(0.001, 100)
-        camera.SetFocalPoint(0, 0, 0)
+        # camera = vtk.vtkCamera()
+        # camera.SetClippingRange(0.001, 100)
+        # camera.SetFocalPoint(0, 0, 0)
+        self.camera_controller.extract_patient_matrix_from_volume(self.volume)
 
-        self.renderer.SetActiveCamera(camera)
+        # self.renderer.SetActiveCamera(camera)
+        self.camera_controller.reset_to_bounds(self.volume.GetBounds(), view='front')
 
-        self.renderer.ResetCamera()
+        # self.renderer.ResetCamera()
+        self.azimuth = self.camera_controller.azimuth
+        self.elevation = self.camera_controller.elevation
+
         self.update_transfer_functions()
         # self.test_AddRGBPoint()
         self.ui.vtk_widget.GetRenderWindow().Render()
-        self.set_camera_view('front')
+        # self.set_camera_view('front')
 
         # self.ui.histgram_widget.set_viewing_range(self.window_level-self.window_width / 2,
         #                                    self.window_level+self.window_width / 2)
@@ -266,14 +274,13 @@ class VolumeViewer(QtWidgets.QMainWindow):
         """
         da = -dx * self.rotation_factor
         de = -dy * self.rotation_factor
-        camera = self.renderer.GetActiveCamera()
-        camera.Azimuth(da)
-        camera.Elevation(de)
-        camera.OrthogonalizeViewUp()
-        self.renderer.ResetCameraClippingRange()
+
+        azimuth, elevation = self.camera_controller.rotate(da, de)
+
+        self.azimuth = azimuth
+        self.elevation = elevation
+
         self.ui.vtk_widget.GetRenderWindow().Render()
-        self.azimuth = (self.azimuth + da) % 360
-        self.elevation = (self.elevation + de) % 360
 
     def apply_camera_angle(self):
         """
@@ -300,64 +307,12 @@ class VolumeViewer(QtWidgets.QMainWindow):
         Set the camera to a preset view angle.
         Valid view values: 'front', 'back', 'left', 'right', 'top', 'bottom'.
         """
+        azimuth, elevation = self.camera_controller.set_preset_view(view)
 
+        self.azimuth = azimuth
+        self.elevation = elevation
 
-        # Preset directions for each view (unit sphere)
-        directions = {
-            'front':  (0.0, 1.0, 0.0),
-            'back':   (0.0, -1.0, 0.0),
-            'left':   (1.0, 0.0, 0.0),
-            'right':  (-1.0, 0.0, 0.0),
-            'top':    (0.0, 0.0, -1.0),
-            'bottom': (0.0, 0.0, 1.0),
-        }
-        # Up vectors to keep orientation
-        viewups = {
-            'front':  (0.0, 0.0, -1.0),
-            'back':   (0.0, 0.0, -1.0),
-            'left':   (0.0, 0.0, -1.0),
-            'right':  (0.0, 0.0, -1.0),
-            'top':    (0.0, -1.0, 0.0),
-            'bottom': (0.0, 1.0, 0.0),
-        }
-        angles = {
-            'front':  (0.0, 0.0),
-            'back':   (180, 0.0),
-            'left':   (90, 0.0),
-            'right':   (270, 0.0),
-            'top':    (0.0, 90.0),
-            'bottom': (0.0, 270.0),
-        }
-        key = view.lower()
-        if key not in directions:
-            return
-
-        patient_matrix = None
-        if self.volume:
-            mapper = self.volume.GetMapper()
-            image = mapper.GetInput()
-            if hasattr(image, "GetDirectionMatrix"):
-                patient_matrix = image.GetDirectionMatrix()
-
-        camera = self.renderer.GetActiveCamera()
-        fp = camera.GetFocalPoint()
-        pos = camera.GetPosition()
-        distance = vtk_helpers.calculate_norm(vtk_helpers.direction_vector(fp, pos))
-        dir_vec = directions[key]
-        up_vec = viewups[key]
-
-        if patient_matrix:
-            dir_vec = vtk_helpers.transform_vector(dir_vec, patient_matrix)
-            up_vec = vtk_helpers.transform_vector(up_vec, patient_matrix)
-
-        new_pos = [fp[i] + dir_vec[i] * distance for i in range(3)]
-        camera.SetPosition(*new_pos)
-        camera.SetViewUp(*up_vec)
-        # Apply position and orientation
-        self.renderer.ResetCameraClippingRange()
-        # Update internal azimuth/elevation status
         self.ui.vtk_widget.GetRenderWindow().Render()
-        self.azimuth, self.elevation = angles[key]
 
     def front_view(self):
         self.set_camera_view('front')
@@ -410,22 +365,19 @@ class VolumeViewer(QtWidgets.QMainWindow):
 
     def set_zoom_factor(self, factor: float):
         """Set the camera zoom factor."""
-        camera = self.renderer.GetActiveCamera()
-        fp = camera.GetFocalPoint()
-        pos = camera.GetPosition()
-
-        dir_vec = vtk_helpers.direction_vector(fp, pos)
-        norm = vtk_helpers.calculate_norm(dir_vec)
-        if norm == 0:
+        if self.volume is None:
             return
-        unit_dir = [d / norm for d in dir_vec]
-        new_dist = self.get_default_distance() / factor
 
-        new_pos = [fp[i] + unit_dir[i] * new_dist for i in range(3)]
-        camera.SetPosition(*new_pos)
-        self.renderer.ResetCameraClippingRange()
+        bounds = self.volume.GetBounds()
+        max_dim = max(
+            bounds[1] - bounds[0],
+            bounds[3] - bounds[2],
+            bounds[5] - bounds[4],
+        )
+        default_distance = 2.0 * max_dim
+
+        self.camera_controller.set_zoom(factor, default_distance)
         self.ui.vtk_widget.GetRenderWindow().Render()
-        self.azimuth, self.elevation = vtk_helpers.get_camera_angles(camera)
 
     def set_zoom_2x(self):
         self.set_zoom_factor(2.0)
