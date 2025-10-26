@@ -95,7 +95,6 @@ def calculate_distance(start_point: tuple[float, float, float],
 
     return math.sqrt(dx*dx + dy*dy + dz*dz)
 
-
 def calculate_norm(vector: tuple[float, float, float]) -> float:
     """Calculate the norm of a vector."""
     return np.sqrt(vector[0] ** 2 + vector[1] ** 2 + vector[2] ** 2)

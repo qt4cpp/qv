@@ -16,6 +16,7 @@ from qv.status import STATUS_FIELDS, StatusField
 from shortcut_manager import ShortcutManager
 from ui.ui_mainwindow import Ui_MainWindow
 from viewer.camera_controller import CameraController
+from viewer.camera_state import CameraAngle
 from volumeviewer_interactor_style import VolumeViewerInteractorStyle
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
         render_window.SetNumberOfLayers(2)
 
         self.camera_controller = CameraController(self.renderer.GetActiveCamera(), self.renderer)
+        self.camera_controller.add_angle_changed_callback(self._on_camera_angle_changed)
 
         self.overlay_renderer = vtk.vtkRenderer()
         self.overlay_renderer.SetLayer(1)
@@ -265,6 +267,11 @@ class VolumeViewer(QtWidgets.QMainWindow):
         self.update_transfer_functions()
         self.update_histgram_window()
 
+    def _on_camera_angle_changed(self, angle: CameraAngle) -> None:
+        """Callback for when the camera angle changes."""
+        self.azimuth = angle.azimuth
+        self.elevation = angle.elevation
+
     def rotate_camera(self, dx: int, dy: int) -> None:
         """
         Rotate the camera according to the mouse movement.
@@ -275,11 +282,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
         da = -dx * self.rotation_factor
         de = -dy * self.rotation_factor
 
-        azimuth, elevation = self.camera_controller.rotate(da, de)
-
-        self.azimuth = azimuth
-        self.elevation = elevation
-
+        self.camera_controller.rotate(da, de)
         self.ui.vtk_widget.GetRenderWindow().Render()
 
     def apply_camera_angle(self):
@@ -307,11 +310,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
         Set the camera to a preset view angle.
         Valid view values: 'front', 'back', 'left', 'right', 'top', 'bottom'.
         """
-        azimuth, elevation = self.camera_controller.set_preset_view(view)
-
-        self.azimuth = azimuth
-        self.elevation = elevation
-
+        self.camera_controller.set_preset_view(view)
         self.ui.vtk_widget.GetRenderWindow().Render()
 
     def front_view(self):
@@ -376,7 +375,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
         )
         default_distance = 2.0 * max_dim
 
-        self.camera_controller.set_zoom(factor, default_distance)
+        self.camera_controller.set_zoom(factor, default_distance=default_distance)
         self.ui.vtk_widget.GetRenderWindow().Render()
 
     def set_zoom_2x(self):

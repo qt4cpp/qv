@@ -6,7 +6,7 @@ import vtk
 import logging
 
 import vtk_helpers
-
+from viewer.camera_state import CameraAngle, CameraStateManager
 
 if TYPE_CHECKING:
     from qv.utils import vtk_helpers
@@ -57,27 +57,22 @@ class CameraController:
     def __init__(self, camera: vtk.vtkCamera, renderer: vtk.vtkRenderer) -> None:
         self.camera = camera
         self.renderer = renderer
-        self._azimuth: float = 0.0
-        self._elevation: float = 0.0
+        self.state = CameraStateManager()
         self._patient_matrix: vtk.vtkMatrix4x4 | None = None
 
     @property
     def azimuth(self) -> float:
         """Current azimuth angle in degrees."""
-        return self._azimuth
-
-    @azimuth.setter
-    def azimuth(self, value: float):
-        self._azimuth = value % 360
+        return self.state.azimuth
 
     @property
     def elevation(self) -> float:
-        """Current elecation angle in degrees."""
-        return self._elevation
+        """Current elevation angle in degrees."""
+        return self.state.elevation
 
-    @elevation.setter
-    def elevation(self, value: float):
-        self._elevation = value % 360
+    def add_angle_changed_callback(self, callback: callable) -> None:
+        """Add a callback for camera angle changes."""
+        self.state.add_angle_changed_callback(callback)
 
     def set_patient_matrix(self, matrix: vtk.vtkMatrix4x4) -> None:
         """Set the patient matrix for the camera."""
@@ -100,22 +95,28 @@ class CameraController:
         else:
             self._patient_matrix = None
 
-    def reset_camera(self) -> None:
-        """Reset the camera to the default position."""
-
     def rotate(self, delta_azimuth: float, delta_elevation: float):
-        """Rotate the camera by delta angles"""
+        """
+        Rotate the camera by delta angles
+
+        :param delta_azimuth: Azimuth change in degrees
+        :param delta_elevation: Elevation change in degrees
+        return: New camera angles
+        """
         self.camera.Azimuth(delta_azimuth)
         self.camera.Elevation(delta_elevation)
         self.camera.OrthogonalizeViewUp()
+
+        new_azimuth = self.state.azimuth + delta_azimuth
+        new_elevation = self.state.elevation + delta_elevation
+
+        self.state.set_angle(new_azimuth, new_elevation)
         self.renderer.ResetCameraClippingRange()
 
-        self._azimuth = (self._azimuth + delta_azimuth) % 360
-        self._elevation = (self._elevation + delta_elevation) % 360
-
+        logger.debug(f"Camera rotation: {delta_azimuth}, {delta_elevation}")
         self.renderer.ResetCameraClippingRange()
 
-        return self._azimuth, self._elevation
+        return self.state.angle
 
     def set_preset_view(self, view: ViewDirection) -> tuple[float, float]:
         """
@@ -127,7 +128,7 @@ class CameraController:
 
         if view not in CameraPreset.DIRECTIONS:
             logger.warning(f"Invalid view direction: {view}")
-            return self._azimuth, self._elevation
+            return self.state.angle
 
         direction = CameraPreset.DIRECTIONS[view]
         view_up = CameraPreset.VIEWUPS[view]
@@ -147,10 +148,12 @@ class CameraController:
         self.camera.SetFocalPoint(*fp)
         self.camera.SetViewUp(*view_up)
 
-        self._azimuth, self._elevation = target_angles[0], target_angles[1]
+        self.state.set_angle(target_angles[0], target_angles[1])
         self.renderer.ResetCameraClippingRange()
 
-        return self._azimuth, self._elevation
+        logger.info(f"Camera preset view: {view}, angles: {target_angles}")
+
+        return self.state.angle
 
     def set_zoom(self, factor: float, default_distance: float | None = None) -> None:
         """
@@ -174,9 +177,13 @@ class CameraController:
             default_distance = norm
 
         new_distance = default_distance / factor
-
         new_position = tuple(fp[i] + unit_direction[i] * new_distance for i in range(3))
+
         self.camera.SetPosition(*new_position)
+
+        new_angle = self._calculate_angles_from_camera()
+        self.state.set_angle(new_angle)
+
         self.renderer.ResetCameraClippingRange()
 
         logger.debug(f"Camera zoom factor: {factor}, new distance: {new_distance}")
@@ -201,9 +208,18 @@ class CameraController:
         self.camera.SetFocalPoint(*center)
         self._set_preset_view_with_distance(view, center, distance)
 
+    def _calculate_angles_from_camera(self) -> CameraAngle:
+        """
+        Calculate azimuth and elevation from current camera position.
+
+        :return: camera angles
+        """
+        azimuth, elevation = vtk_helpers.get_camera_angles(self.camera)
+        return CameraAngle(azimuth, elevation)
+
     def _set_preset_view_with_distance(self, view: ViewDirection,
                                        focal_point: tuple[float, float, float],
-                                       distance: float) -> None:
+                                       distance: float) -> CameraAngle:
         """
         Set the camera preset view with a specified distance.
         :param view: Preset view name
@@ -233,8 +249,10 @@ class CameraController:
         self.camera.SetFocalPoint(*focal_point)
         self.camera.SetViewUp(*view_up)
 
-        self._azimuth, self._elevation = target_angles[0], target_angles[1]
+        self.state.set_angle(target_angles[0], target_angles[1])
         self.renderer.ResetCameraClippingRange()
+
+        return self.state.angle
 
     def get_position(self) -> tuple[float, float, float]:
         """Get the current camera position."""
