@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 from typing import Literal, TYPE_CHECKING
 
 import vtk
@@ -13,6 +14,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 ViewDirection = Literal['front', 'back', 'left', 'right', 'top', 'bottom']
+
 
 class CameraPreset:
     """Camera preset configuration for standard views."""
