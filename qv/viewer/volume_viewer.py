@@ -16,7 +16,7 @@ from qv.status import STATUS_FIELDS, StatusField
 from shortcut_manager import ShortcutManager
 from ui.ui_mainwindow import Ui_MainWindow
 from viewer.camera_controller import CameraController
-from viewer.camera_state import CameraAngle
+from core.camera_state import CameraAngle
 from volumeviewer_interactor_style import VolumeViewerInteractorStyle
 
 logger = logging.getLogger(__name__)

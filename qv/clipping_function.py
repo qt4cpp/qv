@@ -9,7 +9,7 @@ from vtkmodules.vtkRenderingCore import vtkActor
 
 import vtk_helpers
 from log_util import log_io
-from qv.region_selection import RegionSelectionController
+from core.region_selection import RegionSelectionController
 
 if TYPE_CHECKING:
     # 型チェック時のみインポートする

@@ -5,8 +5,8 @@ from typing import Literal, TYPE_CHECKING
 import vtk
 import logging
 
-import vtk_helpers
-from viewer.camera_state import CameraAngle, CameraStateManager
+from core.camera_state import CameraAngle, CameraStateManager
+import core.geometry_utils as geometry_utils
 
 if TYPE_CHECKING:
     from qv.utils import vtk_helpers
@@ -238,8 +238,8 @@ class CameraController:
         target_angles = CameraPreset.ANGLES[view]
 
         if self._patient_matrix:
-            direction = vtk_helpers.transform_vector(direction, self._patient_matrix)
-            view_up = vtk_helpers.transform_vector(view_up, self._patient_matrix)
+            direction = geometry_utils.transform_vector(direction, self._patient_matrix)
+            view_up = geometry_utils.transform_vector(view_up, self._patient_matrix)
 
         new_position = tuple(
             focal_point[i] + direction[i] * distance for i in range(3)
