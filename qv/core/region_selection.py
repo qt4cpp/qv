@@ -6,7 +6,7 @@ import vtk
 
 import logging
 import qv.utils.vtk_helpers as vtk_helpers
-
+from core import geometry_utils
 
 logger = logging.getLogger(__name__)
 
@@ -231,7 +231,7 @@ class RegionSelectionController:
 
         depths = []
         for point in self.world_points:
-            cam_to_point = vtk_helpers.direction_vector(cam_pos, point)
+            cam_to_point = geometry_utils.direction_vector(cam_pos, point)
             depth = sum(cam_to_point[i] * view_dir[i] for i in range(3))
             depths.append(depth)
 

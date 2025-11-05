@@ -6,10 +6,9 @@ import vtk
 import logging
 
 from core.camera_state import CameraAngle, CameraStateManager
-import core.geometry_utils as geometry_utils
+from core import geometry_utils
 
-if TYPE_CHECKING:
-    from qv.utils import vtk_helpers
+from qv.utils import vtk_helpers
 
 logger = logging.getLogger(__name__)
 
@@ -107,10 +106,11 @@ class CameraController:
         self.camera.Elevation(delta_elevation)
         self.camera.OrthogonalizeViewUp()
 
-        new_azimuth = self.state.azimuth + delta_azimuth
-        new_elevation = self.state.elevation + delta_elevation
+        new_angle = CameraAngle(
+            self.state.azimuth + delta_azimuth,
+            self.state.elevation + delta_elevation)
 
-        self.state.set_angle(new_azimuth, new_elevation)
+        self.state.set_angle(new_angle)
         self.renderer.ResetCameraClippingRange()
 
         logger.debug(f"Camera rotation: {delta_azimuth}, {delta_elevation}")
@@ -118,7 +118,7 @@ class CameraController:
 
         return self.state.angle
 
-    def set_preset_view(self, view: ViewDirection) -> tuple[float, float]:
+    def set_preset_view(self, view: ViewDirection) -> CameraAngle:
         """
         Set the camera to a preset view angle.
 
@@ -136,11 +136,11 @@ class CameraController:
 
         fp = self.camera.GetFocalPoint()
         pos = self.camera.GetPosition()
-        distance = vtk_helpers.calculate_distance(fp, pos)
+        distance = geometry_utils.calculate_distance(fp, pos)
 
         if self._patient_matrix:
-            direction = vtk_helpers.transform_vector(direction, self._patient_matrix)
-            view_up = vtk_helpers.transform_vector(view_up, self._patient_matrix)
+            direction = geometry_utils.transform_vector(direction, self._patient_matrix)
+            view_up = geometry_utils.transform_vector(view_up, self._patient_matrix)
 
         new_pos = tuple(fp[i] + direction[i] * distance for i in range(3))
 
@@ -148,7 +148,7 @@ class CameraController:
         self.camera.SetFocalPoint(*fp)
         self.camera.SetViewUp(*view_up)
 
-        self.state.set_angle(target_angles[0], target_angles[1])
+        self.state.set_angle(CameraAngle(target_angles[0], target_angles[1]))
         self.renderer.ResetCameraClippingRange()
 
         logger.info(f"Camera preset view: {view}, angles: {target_angles}")
@@ -164,8 +164,8 @@ class CameraController:
         """
         fp = self.camera.GetFocalPoint()
         pos = self.camera.GetPosition()
-        direction = vtk_helpers.direction_vector(fp, pos)
-        norm = vtk_helpers.calculate_norm(direction)
+        direction = geometry_utils.direction_vector(fp, pos)
+        norm = geometry_utils.calculate_norm(direction)
 
         if norm == 0:
             logger.warning("Camera direction vector has zero length. Aborting set_zoom().")
@@ -249,7 +249,7 @@ class CameraController:
         self.camera.SetFocalPoint(*focal_point)
         self.camera.SetViewUp(*view_up)
 
-        self.state.set_angle(target_angles[0], target_angles[1])
+        self.state.set_angle(CameraAngle(target_angles[0], target_angles[1]))
         self.renderer.ResetCameraClippingRange()
 
         return self.state.angle
@@ -270,4 +270,4 @@ class CameraController:
         """Get the distance between the camera position and focal point."""
         fp = self.camera.GetFocalPoint()
         pos = self.camera.GetPosition()
-        return vtk_helpers.calculate_distance(fp, pos)
+        return geometry_utils.calculate_distance(fp, pos)

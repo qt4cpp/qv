@@ -8,6 +8,7 @@ from vtkmodules.vtkImagingStencil import vtkImplicitFunctionToImageStencil
 from vtkmodules.vtkRenderingCore import vtkActor
 
 import vtk_helpers
+from core import geometry_utils
 from log_util import log_io
 from core.region_selection import RegionSelectionController
 
@@ -210,8 +211,8 @@ class QVVolumeClipper:
         # Get the information of camera
         cam = self.viewer.renderer.GetActiveCamera()
         fp = cam.GetFocalPoint()
-        view_vec = vtk_helpers.direction_vector(cam.GetPosition(), fp)
-        norm = vtk_helpers.calculate_norm(view_vec)
+        view_vec = geometry_utils.direction_vector(cam.GetPosition(), fp)
+        norm = geometry_utils.calculate_norm(view_vec)
         # norm が 0 の場合を防ぐ
         if norm == 0:
             print("[Clip] Camera direction vector has zero length. Aborting finalize_clip().")

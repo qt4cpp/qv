@@ -10,6 +10,7 @@ from vtkmodules.util.numpy_support import vtk_to_numpy
 
 import qv.utils.vtk_helpers as vtk_helpers
 from app_settings_manager import AppSettingsManager
+from core import geometry_utils
 from qv.utils.log_util import log_io
 from clipping_function import QVVolumeClipper, ClippingInteractorStyle
 from qv.status import STATUS_FIELDS, StatusField
@@ -492,7 +493,7 @@ class VolumeViewer(QtWidgets.QMainWindow):
         n = len(world_points)
         for i, pt in enumerate(world_points):
             to_cam = [cam_pos[j] - pt[j] for j in range(3)]
-            length = vtk_helpers.calculate_norm(to_cam)
+            length = geometry_utils.calculate_norm(to_cam)
             if length:
                 disp_pt = [pt[j] + to_cam[j] / length * offset for j in range(3)]
             else:

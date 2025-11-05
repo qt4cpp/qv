@@ -47,14 +47,19 @@ class CameraStateManager:
         """Get current camera elevation angle."""
         return self._angle.elevation
 
-    def set_angle(self, azimuth: float, elevation: float) -> None:
+    def set_angle(self, angle: CameraAngle | float, elevation: float | None = None) -> None:
         """
         Set camera angle.
 
-        :param azimuth:
+        :param angle: CameraAngle object or azimuthvalue
         :param elevation:
         """
-        new_angle = CameraAngle(azimuth, elevation)
+        if isinstance(angle, CameraAngle):
+            new_angle = angle
+        else:
+            if elevation is None:
+                raise TypeError("Elevation is required when angle is not a CameraAngle object.")
+            new_angle = CameraAngle(angle, elevation)
 
         if new_angle.azimuth != self._angle.azimuth or \
             new_angle.elevation != self._angle.elevation:
