@@ -1,10 +1,8 @@
 """Base viewer class for VTK-based viewers"""
 from __future__ import annotations
 
-import copy
 import logging
-from abc import ABC, abstractmethod
-from pathlib import Path
+from abc import ABCMeta, abstractmethod
 from typing import TYPE_CHECKING
 
 import vtk
@@ -12,10 +10,7 @@ from PySide6 import QtWidgets, QtCore
 
 from app_settings_manager import AppSettingsManager
 from core.camera_state import CameraAngle
-from qv.status import STATUS_FIELDS, StatusField
-from shortcut_manager import ShortcutManager
-from ui.ui_mainwindow import Ui_MainWindow
-from viewer.camera_controller import CameraController
+from viewers.camera_controller import CameraController
 
 if TYPE_CHECKING:
     pass
@@ -23,7 +18,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class BaseViewer(QtWidgets.QWidget, ABC):
+class ABCQtMeta(ABCMeta, type(QtWidgets.QWidget)):
+    """
+    Metaclass that combines ABCMeta and type(QWidget)
+    """
+    pass
+
+
+class BaseViewer(QtWidgets.QWidget, metaclass=ABCQtMeta):
     """
     Base class for VTK-based viewers
 

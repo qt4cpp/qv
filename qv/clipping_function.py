@@ -7,7 +7,6 @@ from vtkmodules.vtkCommonDataModel import vtkImplicitSelectionLoop
 from vtkmodules.vtkImagingStencil import vtkImplicitFunctionToImageStencil
 from vtkmodules.vtkRenderingCore import vtkActor
 
-import vtk_helpers
 from core import geometry_utils
 from log_util import log_io
 from core.region_selection import RegionSelectionController
@@ -15,7 +14,7 @@ from core.region_selection import RegionSelectionController
 if TYPE_CHECKING:
     # 型チェック時のみインポートする
     # 相互参照となってしまう。
-    from viewer.volume_viewer import VolumeViewer
+    from viewers.volume_viewer import VolumeViewer
 
 
 logger = logging.getLogger(__name__)
@@ -67,7 +66,7 @@ class QVVolumeClipper:
 
         self.selection_active = False
         self.region_selection = RegionSelectionController(
-            viewer.ui.vtk_widget.GetRenderWindow(),
+            viewer.vtk_widget.GetRenderWindow(),
             viewer.renderer,
             overlay_renderer,
         )

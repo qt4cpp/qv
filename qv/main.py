@@ -3,14 +3,12 @@ import sys
 
 from PySide6 import QtWidgets
 
-from viewer.volume_viewer import VolumeViewer
+from ui.mainwindow import MainWindow
 from app_settings_manager import AppSettingsManager
-from logging_setup import LogSystem, apply_logging_policy
+from logging_setup import apply_logging_policy, LogSystem
 from ui.error_notifier import ErrorNotifier
-from vtk_helpers import return_dicom_dir
 
 logger = logging.getLogger(__name__)
-
 
 
 def main():
@@ -33,7 +31,8 @@ def main():
     settings_mgr = AppSettingsManager()
     apply_logging_policy(logs, settings_mgr)
     ErrorNotifier.configure(settings_mgr)
-    viewer = VolumeViewer(return_dicom_dir(), settings_mgr)
+
+    main_window = MainWindow(settings_mgr)
 
     # Qt 終了次にログを確実に止める
     app.aboutToQuit.connect(logs.stop)

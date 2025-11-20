@@ -5,7 +5,7 @@ import vtk
 import numpy as np
 from PySide6 import QtWidgets
 from matplotlib import pyplot as plt
-from vtkmodules.vtkDICOM import vtkDICOMReader, vtkDICOMTag
+from vtkmodules.util.numpy_support import vtk_to_numpy
 
 from core import geometry_utils
 
@@ -25,6 +25,21 @@ def select_dicom_directory() -> str | None:
     if dialog.exec():
         return dialog.selectedFiles()[0]
     return None
+
+
+def vtk_image_to_numpy(image: vtk.vtkImageData, sampling: int = 1) -> np.ndarray:
+    """
+    the image data convert to a numpy array.
+
+    :return: Numpy array or None.
+    """
+    scalars = image.GetPointData().GetScalars()
+    arr = vtk_to_numpy(scalars)
+
+    if sampling > 1:
+        arr = arr[::sampling]
+
+    return arr
 
 
 def plot_hist_clip(volume, bins=100, lower_pct=25, upper_pct=99):

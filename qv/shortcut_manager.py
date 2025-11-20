@@ -69,9 +69,11 @@ class ShortcutManager:
         }
         :return: dict[str, str]
         """
+        logger.debug(f"Loading default shortcuts: {self.config_path}")
         try:
             with open(self.config_path / "shortcuts.json", "r", encoding="utf-8") as f:
                 data = json.load(f)
+                logger.debug(f"Loaded default shortcuts: {data}")
                 return data if isinstance(data, dict) else {}
         except (FileNotFoundError, json.JSONDecodeError) as e:
             print(f"[ShortcutManager] Error loading shortcuts.json: {e}")
