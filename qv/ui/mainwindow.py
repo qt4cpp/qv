@@ -197,6 +197,9 @@ class MainWindow(QMainWindow):
         self._update_status("window_level", window_settings.level)
         self._update_status("window_width", window_settings.width)
 
+        if self.volume_viewer.opacity_func:
+            self.histgram_widget.update_opacity_curve(self.volume_viewer.opacity_func)
+
     def _update_status(self, key: str, value) -> None:
         """Update status bar label."""
         label = self._status_label.get(key)
