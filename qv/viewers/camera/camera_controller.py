@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from typing import Literal, TYPE_CHECKING
+from typing import Literal
 
 import vtk
 import logging
 
-from core.camera_state import CameraAngle, CameraStateManager
+from viewers.camera.camera_state import CameraAngle, CameraStateManager
 from core import geometry_utils
 
 from qv.utils import vtk_helpers

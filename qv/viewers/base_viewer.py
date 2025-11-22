@@ -9,8 +9,8 @@ import vtk
 from PySide6 import QtWidgets, QtCore
 
 from app_settings_manager import AppSettingsManager
-from core.camera_state import CameraAngle
-from viewers.camera_controller import CameraController
+from viewers.camera.camera_state import CameraAngle
+from viewers.camera.camera_controller import CameraController
 
 if TYPE_CHECKING:
     pass

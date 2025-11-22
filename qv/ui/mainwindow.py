@@ -1,11 +1,11 @@
 import logging
 from pathlib import Path
 
-from PySide6 import QtWidgets, QtCore
+from PySide6 import QtCore
 from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QSplitter, QHBoxLayout, QLabel, QPushButton
 
 from app_settings_manager import AppSettingsManager
-from core.camera_state import CameraAngle
+from viewers.camera.camera_state import CameraAngle
 from core.window_settings import WindowSettings
 from log_util import log_io
 from qv.status import STATUS_FIELDS, StatusField

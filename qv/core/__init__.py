@@ -1,6 +1,6 @@
 """Core components layer - shared, view-independent functionality."""
 
-from qv.core.camera_state import CameraAngle, CameraStateManager
+from viewers.camera.camera_state import CameraAngle, CameraStateManager
 from qv.core.geometry_utils import (
     calculate_distance,
     calculate_norm,
