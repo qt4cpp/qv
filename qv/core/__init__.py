@@ -7,7 +7,7 @@ from qv.core.geometry_utils import (
     direction_vector,
     transform_vector,
 )
-from qv.core.interaction_controller import InteractionController
+from viewers.controllers.interaction_controller import InteractionController
 
 __all__ = [
     "CameraAngle",

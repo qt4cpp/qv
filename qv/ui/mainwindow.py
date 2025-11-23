@@ -4,14 +4,14 @@ from pathlib import Path
 from PySide6 import QtCore
 from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QSplitter, QHBoxLayout, QLabel, QPushButton
 
-from app_settings_manager import AppSettingsManager
+from app.app_settings_manager import AppSettingsManager
 from viewers.camera.camera_state import CameraAngle
 from core.window_settings import WindowSettings
 from log_util import log_io
-from qv.status import STATUS_FIELDS, StatusField
-from shortcut_manager import ShortcutManager
+from app.status import STATUS_FIELDS, StatusField
+from app.shortcut_manager import ShortcutManager
 from viewers.volume_viewer import VolumeViewer
-from qv.histgram import HistogramWidget
+from ui.widgets.histgram_widget import HistogramWidget
 import qv.utils.vtk_helpers as vtk_helpers
 import copy
 

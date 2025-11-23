@@ -1,16 +1,15 @@
-import os
 import sys
 import json
 import logging
 
 from pathlib import Path
 from typing import Callable, Optional, Protocol
-from PySide6.QtWidgets import QMainWindow, QMenuBar, QMenu
+from PySide6.QtWidgets import QMainWindow
 from PySide6.QtGui import QKeySequence, QAction
 from PySide6.QtCore import QSettings
 
-from qv.ui.error_notifier import ErrorNotifier
-from qv.app_settings_manager import AppSettingsManager, RunMode
+from ui.dialogs.error_notifier import ErrorNotifier
+from app.app_settings_manager import AppSettingsManager, RunMode
 
 
 logger = logging.getLogger(__name__)

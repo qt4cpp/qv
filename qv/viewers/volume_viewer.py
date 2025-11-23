@@ -2,20 +2,18 @@
 import logging
 import math
 
-import numpy as np
 import vtk
 from PySide6 import QtCore
 from PySide6.QtCore import QEvent
-from vtkmodules.util.numpy_support import vtk_to_numpy
 
 import qv.utils.vtk_helpers as vtk_helpers
-from app_settings_manager import AppSettingsManager
+from app.app_settings_manager import AppSettingsManager
 from core import geometry_utils
 from core.window_settings import WindowSettings
 from qv.utils.log_util import log_io
 from clipping_function import QVVolumeClipper, ClippingInteractorStyle
 from viewers.base_viewer import BaseViewer
-from volumeviewer_interactor_style import VolumeViewerInteractorStyle
+from viewers.interactor_styles.volume_interactor_style import VolumeViewerInteractorStyle
 
 logger = logging.getLogger(__name__)
 

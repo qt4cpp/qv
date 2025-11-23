@@ -1,7 +1,5 @@
-import os
 import sys
 import json
-import types
 import logging
 import pytest
 
@@ -9,9 +7,8 @@ from pathlib import Path
 
 from PySide6 import QtWidgets
 from PySide6.QtCore import QSettings
-from PySide6.QtGui import QKeySequence
 
-import shortcut_manager as sm
+from app import shortcut_manager as sm
 
 
 @pytest.fixture(scope="session")

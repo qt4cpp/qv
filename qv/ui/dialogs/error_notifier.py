@@ -1,10 +1,10 @@
 from __future__ import annotations
-import os, time, traceback, logging
+import time, traceback, logging
 from typing import Optional
 from PySide6.QtWidgets import QApplication, QMessageBox, QErrorMessage
 from PySide6.QtCore import QObject, QTimer, Qt
 
-from app_settings_manager import AppSettingsManager
+from app.app_settings_manager import AppSettingsManager
 
 
 logger = logging.getLogger(__name__)

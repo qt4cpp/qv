@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import vtk
 from PySide6 import QtWidgets, QtCore
 
-from app_settings_manager import AppSettingsManager
+from app.app_settings_manager import AppSettingsManager
 from viewers.camera.camera_state import CameraAngle
 from viewers.camera.camera_controller import CameraController
 

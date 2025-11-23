@@ -4,9 +4,9 @@ import sys
 from PySide6 import QtWidgets
 
 from ui.mainwindow import MainWindow
-from app_settings_manager import AppSettingsManager
-from logging_setup import apply_logging_policy, LogSystem
-from ui.error_notifier import ErrorNotifier
+from app.app_settings_manager import AppSettingsManager
+from app.logging_setup import apply_logging_policy, LogSystem
+from ui.dialogs.error_notifier import ErrorNotifier
 
 logger = logging.getLogger(__name__)
 
