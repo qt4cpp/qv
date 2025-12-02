@@ -1,0 +1,527 @@
+"""
+Clipping operation for volume data based on user-defined region.
+"""
+import logging
+from typing import TYPE_CHECKING, Sequence, Callable
+
+import vtk
+from vtkmodules.vtkCommonDataModel import vtkImplicitSelectionLoop
+from vtkmodules.vtkRenderingCore import vtkActor
+
+from core import geometry_utils
+from core.region_selection import RegionSelectionController
+from log_util import log_io
+from operations.base_operation import BaseOperation
+
+if TYPE_CHECKING:
+    # 型チェック時のみインポートする
+    # 相互参照となってしまう。
+    from viewers.volume_viewer import VolumeViewer
+
+
+logger = logging.getLogger(__name__)
+
+
+class ClippingOperation(BaseOperation):
+    """
+    Operation to clip volume data based on user-defined region.
+
+    This operation allows users to define a 3D region by selecting points,
+    then clips (removes) volume data within that region. The operation is
+    independent of viewer implementation nad only depends on:
+    - Image data (vtk.vtkImageData)
+    - Camera information (vtk.vtkCamera)
+    - Renderer for visualization (vtk.vtkRenderer)
+
+    Attributes:
+        viewer: Reference to VolumeViewer (needed for UI integration)
+        ovarlay_renderer: Renderer for visualization elemnts
+        region_slection: Controller for region selection
+        clip_loop: The implicit selection loop defining the clip region.
+        preview_extrude_actor: Actor for 3D preview of the clip region.
+    """
+
+    def __init__(
+            self,
+            viewer: "VolumeViewer",
+            overlay_renderer: vtk.vtkRenderer,
+            image_provider: Callable[[], vtk.vtkImageData | None] | None = None,
+            camera_provider: Callable[[], vtk.vtkCamera | None] | None = None,
+            renderer_provider: Callable[[], vtk.vtkRenderer | None] | None = None,
+            image_updater: Callable[[vtk.vtkImageData], None] | None = None,
+    ):
+        """
+        Initialize the clipping operation.
+
+        :param viewer: The volume viewer instance.
+        :param overlay_renderer: Renderer for selection visualization.
+        :param image_provider: Optional callable to get curernt image data.
+                               Defaults to getting from viewer.volume.
+        :param camera_provider: Optional callable to get current camera.
+                                Defaults to getting from viewer.renderer.
+        :param renderer_provider: Optional callbale to get renderer.
+                                  Defaults to getting from viewer.renderer.
+        :param image_updater: Optional callbale to update viewer with new image.
+                              Defaults to updating viewer.volume.
+        """
+        super().__init__()
+        self.viewer = viewer
+        self.overlay_renderer = overlay_renderer
+
+        # Data providers and updaters  (for flexiblility and testability)
+        self._image_provider = image_provider or self._default_image_provider
+        self._camera_provider = camera_provider or self._default_camera_provider
+        self._renderer_provider = renderer_provider or self._default_renderer_provider
+        self._image_updater = image_updater or self._default_image_updater
+
+        # Selection state
+        self.clip_points_display: list[tuple[float, float]] = []
+        self.clip_points_world: list[tuple[float, float, float]] = []
+
+        # VTK objects
+        self.clip_loop: vtkImplicitSelectionLoop | None = None
+        self.preview_extrude_actor: vtkActor | None = None
+
+        # Region selection controller
+        self.region_selection = RegionSelectionController(
+            viewer.vtk_widget.GetRenderWindow(),
+            viewer.renderer,
+            overlay_renderer,
+        )
+        self.region_selection.set_closed_callback(self._on_region_closed)
+
+        logger.debug("[ClippingOperation] Initialized.")
+
+    # =====================================================
+    # Lifecycle methods (BaseOperation interface)
+    # =====================================================
+
+    def start(self) -> None:
+        """
+        Start the clipping operation.
+
+        Resets state, creates binary mask, applies it to the images.
+        and updates the viewer.
+        """
+        logger.info("[ClippingOperation] Starting operation.")
+        self.reset()
+        self.is_active = True
+        self.region_selection.enable()
+
+    def apply(self) -> None:
+        """
+        Apply the clipping operation to the volume.
+
+        Validates state, creates binary mask, applies it to the images,
+        and updates the viewer.
+        """
+        logger.info("[ClippingOperation] Applying operation.")
+
+        if not self._has_backup():
+            current_image = self._image_provider()
+            if current_image is not None:
+                self._backup_image_data(current_image)
+                logger.info("[ClippingOperation] Backed up current image.")
+            else:
+                logger.warning("[ClippingOperation] No backup and current image. Aborting.")
+                self.reset()
+                return
+
+        if self.clip_loop is None:
+            logger.warning("[ClippingOperation] No clip loop defined. Aborting.")
+            self.reset()
+            return
+
+        clipping_img = self._apply_clipping()
+        if clipping_img is not None:
+            self._image_updater(clipping_img)
+            self._backup_image_data(clipping_img)
+
+        self.reset()
+
+    def cancel(self) -> None:
+        """
+        Cancel the clipping operation.
+
+        Restores the backup image if available.
+        """
+        logger.info("[ClippingOperation] Canceling operation.")
+        if self._has_backup():
+            self._image_updater(self.backup_image)
+        self.reset()
+
+    def reset(self) -> None:
+        """
+        Reset the clipping operation to initial state.
+
+        Clears all internal state, removes preview, and disables region selection.
+        """
+        logger.debug("[ClippingOperation] Resetting operation.")
+
+        if self.preview_extrude_actor is not None:
+            renderer = self._renderer_provider()
+            if renderer is not None and self.preview_extrude_actor is not None:
+                renderer.RemoveActor(self.preview_extrude_actor)
+            self.preview_extrude_actor = None
+
+        # Stop region selection
+        self._stop_region_selection()
+
+        self.backup_image = None
+        self.clip_loop = None
+        self.clip_points_display.clear()
+        self.clip_points_world.clear()
+        self.is_active = False
+
+        # Clear viewer visualization
+        if hasattr(self.viewer, "clipping_points"):
+            self.viewer.clipping_points.clear()
+        if hasattr(self.viewer, "update_clipper_visualization"):
+            self.viewer.update_clipper_visualization()
+
+    # =====================================================
+    # Clipping-specific public interface
+    # =====================================================
+
+    def add_selection_point(self, display_xy: tuple[float, float],
+                            world_pt: tuple[float, float, float]) -> None:
+        """
+        Add a point to the selection region.
+
+        :param display_xy: Display coordinates (x, y) in pixels.
+        :param world_pt: World coordinates (x, y, z).
+        """
+        if not self.is_active:
+            return
+        self.region_selection.add_display_point(display_xy[0], display_xy[1], world_pt)
+
+    def complete_selection(self) -> None:
+        """
+        Complete the region selection.
+
+        Signals the region selection controller to finish selecting points.
+        """
+        if not self.is_active:
+            return
+        self.region_selection.complete()
+
+    def finalize_clip(self) -> None:
+        """
+        Finalize the clip region and create preview visualization.
+
+        Creates the implicit selection loop and 3D preview actor
+        for visualization before applying the clip.
+        """
+        logger.info("[ClippingOperation] Finalizing clip region.")
+
+        # Backup current image
+        current_image = self._image_provider()
+        if current_image is None:
+            logger.warning("[ClippingOperation] No current image.")
+            self.clip_loop = None
+            return
+
+        self._backup_image_data(current_image)
+
+        if len(self.clip_points_display) < 3:
+            logger.warning("[ClippingOperation] Need at least 3 points. God %d",
+                           len(self.clip_points_display))
+            self.backup_image = None
+            self.clip_loop = None
+            return
+
+        camera = self._camera_provider()
+        if camera is None:
+            logger.warning("[ClippingOperation] No camera available.")
+            self.backup_image = None
+            self.clip_loop = None
+            return
+
+        fp = camera.GetFocalPoint()
+        view_vec = geometry_utils.direction_vector(camera.GetPosition(), fp)
+        norm = geometry_utils.calculate_norm(view_vec)
+
+        if norm == 0:
+            logger.warning("[ClippingOperation] Camera direction is invalid.")
+            self.backup_image = None
+            self.clip_loop = None
+            return
+
+        view_vec = [v/ norm for v in view_vec]
+
+        # Create VTK points from world points
+        world_points = list(self.clip_points_world)
+        if len(world_points) < 3:
+            logger.warning("[ClippingOperation] Not enough world points.")
+            self.backup_image = None
+            self.clip_loop = None
+            return
+
+        vtk_points = vtk.vtkPoints()
+        for pt in world_points:
+            vtk_points.InsertNextPoint(*pt)
+
+        self.clip_loop = vtkImplicitSelectionLoop()
+        self.clip_loop.SetLoop(vtk_points)
+        self.clip_loop.SetNormal(*view_vec)
+        self.clip_loop.AutomaticNormalGenerationOff()
+
+        self._create_preview(vtk_points, view_vec)
+
+        logger.info("[ClippingOperation] Finalized with %d points.", len(world_points))
+
+    def on_camera_updated(self) -> None:
+        """
+        Handle camera update events.
+
+        Updates visualization when camera changes during selection.
+        """
+        if self.is_active:
+            if hasattr(self.viewer, "update_clipper_visualization"):
+                self.viewer.update_clipper_visualization()
+
+    def get_preview_world_points(self) -> list[tuple[float, float, float]]:
+        """
+        Get world points for preview visualization.
+
+        :return: List of world points.
+        """
+        if self.clip_points_world:
+            return list(self.clip_points_world)
+
+        if self.is_active:
+            return self.region_selection.get_world_points()
+        return []
+
+    # =====================================================
+    # Internal helpers
+    # =====================================================
+
+    def _stop_region_selection(self) -> None:
+        """Stop region selection mode."""
+        if self.region_selection.is_enabled():
+            self.region_selection.disable()
+
+    def _on_region_closed(
+            self,
+            display_points: Sequence[tuple[float, float]],
+            world_points: Sequence[tuple[float, float, float]],
+    ) -> None :
+        """
+        Callback when region selection is closed.
+
+        :param display_points: Display coordinates of selection.
+        :param world_points:  World coordinates of selection.
+        """
+        if len(display_points) < 3 or len(world_points) < 3:
+            self._stop_region_selection()
+            self.reset()
+            return
+
+        self.clip_points_display = list(display_points)
+        self.clip_points_world = list(world_points)
+        self._stop_region_selection()
+
+        if hasattr(self.viewer, "update_clipper_visualization"):
+            self.viewer.update_clipper_visualization()
+
+        previous_loop = self.clip_loop
+        self.finalize_clip()
+
+        # Notify viewer that clip result is ready
+        if self.clip_loop is not None and self.clip_loop is not previous_loop:
+            if hasattr(self.viewer, "update_clipper_visualization"):
+                self.viewer.update_clipper_visualization()
+            self.viewer.enter_clip_result_mode()
+
+    def _apply_clipping(self) -> vtk.vtkImageData | None:
+        """
+        Apply clipping to the backup image.
+
+        :return: Clipped image data, or None if failed.
+        """
+        if not self._has_backup() or self.clip_loop is None:
+            return None
+
+        # Try mask-based approach first
+        mask_img = self._build_binary_mask()
+        if mask_img is not None:
+            return self._apply_mask(mask_img)
+
+        # Fallback to stencil-based approach
+        return self._apply_stencil()
+
+    def _build_binary_mask(self) -> vtk.vtkImageData | None:
+        """
+        Build binary mask from clip loop.
+
+        Creates a mask where 0 represents inside the clip region
+        and 255 represents outside.
+
+        :return: Binary mask image, or None if failed.
+        """
+        if not self._has_backup() or self.clip_loop is None:
+            return None
+
+        stenciler = vtk.vtkImplicitFunctionToImageStencil()
+        stenciler.SetInput(self.clip_loop)
+        stenciler.SetOutputSpacing(self.backup_image.GetSpacing())
+        stenciler.SetOutputOrigin(self.backup_image.GetOrigin())
+        stenciler.SetOutputWholeExtent(self.backup_image.GetExtent())
+        stenciler.Update()
+
+        ones = vtk.vtkImageThreshold()
+        ones.SetInputData(self.backup_image)
+        ones.ReplaceInOn()
+        ones.ReplaceOutOn()
+        ones.ThresholdBetween(-1e38, 1e38)
+        ones.SetInValue(255)
+        ones.SetOutValue(255)
+        ones.SetOutputScalarTypeToUnsignedChar()
+        ones.Update()
+
+        img_stencil = vtk.vtkImageStencil()
+        img_stencil.SetInputData(ones.GetOutput())
+        img_stencil.SetStencilConnection(stenciler.GetOutputPort())
+        img_stencil.ReverseStencilOn()
+        img_stencil.SetBackgroundValue(0)
+        img_stencil.Update()
+
+        mask_img = vtk.vtkImageData()
+        mask_img.ShallowCopy(img_stencil.GetOutput())
+
+        logger.debug("[ClippingOperation] Mask cerated: type=%s, range=%s",
+                     mask_img.GetScalarTypeAsString(),
+                     mask_img.GetScalarRange())
+
+        return mask_img
+
+    def _apply_mask(self, mask_img: vtk.vtkImageData) -> vtk.vtkImageData | None:
+        """
+        Apply mask to back up image.
+
+        :param mask_img: Binary mask image.
+        :return: Clipped image data.
+        """
+        masker = vtk.vtkImageMask()
+        masker.SetInputData(self.backup_image)
+        masker.SetMaskInputData(mask_img)
+        masker.SetMaskedOutputValue(0)
+        masker.Update()
+
+        clipped_img = vtk.vtkImageData()
+        clipped_img.DeepCopy(masker.GetOutput())
+
+        return clipped_img
+
+    def _apply_stencil(self) -> vtk.vtkImageData | None:
+        """
+        Apply stencil directly (fallback method).
+
+        :return: Clipped image data.
+        """
+        if not self._has_backup() or self.clip_loop is None:
+            return None
+
+        stenciler = vtk.vtkImplicitFunctionToImageStencil()
+        stenciler.SetInput(self.clip_loop)
+        stenciler.SetOutputSpacing(self.backup_image.GetSpacing())
+        stenciler.SetOutputOrigin(self.backup_image.GetOrigin())
+        stenciler.SetOutputWholeExtent(self.backup_image.GetExtent())
+        stenciler.Update()
+
+        image_stencil = vtk.vtkImageStencil()
+        image_stencil.SetInputData(self.backup_image)
+        image_stencil.SetStencilConnection(stenciler.GetOutputPort())
+        image_stencil.ReverseStencilOn()
+        image_stencil.SetBackgroundValue(0)
+        image_stencil.Update()
+
+        clipped_img = vtk.vtkImageData()
+        clipped_img.DeepCopy(image_stencil.GetOutput())
+
+        return clipped_img
+
+    def _create_preview(self, vtk_points: vtk.vtkPoints, view_vec: list[float]) -> None:
+        """
+        Create 3D preview of the clipping region.
+
+        :param vtk_points: Points defining the selection loop.
+        :param view_vec: Normalized view direction vector.
+        """
+        if not self._has_backup():
+            return
+
+        bounds = self.backup_image.GetBounds()
+        depth = max(
+            bounds[1] - bounds[0],
+            bounds[3] - bounds[2],
+            bounds[5] - bounds[4]
+        )
+
+        poly = vtk.vtkPolyData()
+        poly.SetPoints(vtk_points)
+
+        lines = vtk.vtkCellArray()
+        num_pts = vtk_points.GetNumberOfPoints()
+        lines.InsertNextCell(num_pts + 1)
+        for i in range(num_pts):
+            lines.InsertCellPoint(i)
+        lines.InsertCellPoint(0)
+        poly.SetLines(lines)
+
+        extrude = vtk.vtkLinearExtrusionFilter()
+        extrude.SetInputData(poly)
+        extrude.SetVector(view_vec)
+        extrude.SetExtrusionTypeToNormalExtrusion()
+        extrude.SetScaleFactor(depth * 2)
+        extrude.SetCapping(True)
+        extrude.Update()
+
+        mapper3D = vtk.vtkPolyDataMapper()
+        mapper3D.SetInputConnection(extrude.GetOutputPort())
+        self.preview_extrude_actor = vtk.vtkActor()
+        self.preview_extrude_actor.SetMapper(mapper3D)
+        self.preview_extrude_actor.GetProperty().SetColor(0.5, 0.5, 0)
+        self.preview_extrude_actor.GetProperty().SetOpacity(0.95)
+
+        renderer = self._renderer_provider()
+        if renderer is not None:
+            renderer.AddActor(self.preview_extrude_actor)
+
+        self.viewer.preview_extrude_actor = self.preview_extrude_actor
+        self._render()
+
+    def _render(self) -> None:
+        """Trigger render on viewer"""
+        if hasattr(self.viewer, "vtk_widget"):
+            self.viewer.vtk_widget.GetRenderWindow().Render()
+
+    # =====================================================
+    # Default provider/updater implementations
+    # =====================================================
+
+    def _default_image_provider(self) -> vtk.vtkImageData | None:
+        """Get current image from viewer"""
+        if not hasattr(self.viewer, "volume") or self.viewer.volume is None:
+            return None
+        return self.viewer.volume.GetMapper().GetInput()
+
+    def _default_camera_provider(self) -> vtk.vtkCamera | None:
+        """Get current camera from viewer"""
+        if not hasattr(self.viewer, "renderer"):
+            return None
+        return self.viewer.renderer.GetActiveCamera()
+
+    def _default_renderer_provider(self) -> vtk.vtkRenderer | None:
+        """Get current renderer from viewer"""
+        return getattr(self.viewer, "renderer", None)
+
+    def _default_image_updater(self, image_data: vtk.vtkImageData) -> None:
+        """Update volume mapper with new image data"""
+        if not hasattr(self.viewer, "volume") or self.viewer.volume is None:
+            return
+        mapper = self.viewer.volume.GetMapper()
+        mapper.SetInputData(image_data)
+        self.viewer.volume.SetMapper(mapper)
+        self._render()

@@ -11,7 +11,8 @@ from app.app_settings_manager import AppSettingsManager
 from core import geometry_utils
 from core.window_settings import WindowSettings
 from qv.utils.log_util import log_io
-from clipping_function import QVVolumeClipper, ClippingInteractorStyle
+from operations.clipping.clipping_operation import ClippingOperation
+from viewers.interactor_styles.clipping_interactor_style import ClippingInteractorStyle
 from viewers.base_viewer import BaseViewer
 from viewers.interactor_styles.volume_interactor_style import VolumeViewerInteractorStyle
 
@@ -38,8 +39,9 @@ class VolumeViewer(BaseViewer):
         Initialize the volume viewer widget.
 
         :param settings_manager: Application settings manager.
-        :param parent:
+        :param parent: Parent Widget
         """
+
         # Volume-specific attributes
         self.image: vtk.vtkImageData | None = None
         self.volume: vtk.vtkVolume | None = None
@@ -52,6 +54,14 @@ class VolumeViewer(BaseViewer):
         self._window_settings = WindowSettings(level=0.0, width=1.0)
         self.delta_per_pixel: float = 1
 
+        # Clipping operation and visualization
+        self.clipping_operation: ClippingOperation | None = None
+        self._clipping_interactor_style: ClippingInteractorStyle | None = None
+        self.clipper_actor = vtk.vtkActor()
+        self.clipper_polydata = vtk.vtkPolyData()
+        self.clipper_mapper = vtk.vtkPolyDataMapper()
+        self.preview_extrude_actor: vtk.vtkActor | None = None
+
         super().__init__(settings_manager=settings_manager, parent=parent)
         self.vtk_widget.installEventFilter(self)
         self._setup_clipping()
@@ -63,12 +73,17 @@ class VolumeViewer(BaseViewer):
 
     def _setup_clipping(self) -> None:
         """Setup clipping functionality and visualization."""
-        self._clipping_interactor_style = ClippingInteractorStyle(self)
-        self.clipper = QVVolumeClipper(self, self.overlay_renderer)
+        logger.debug("[VolumeViewer] Setting up clipping operations")
 
-        self.clipper_actor = vtk.vtkActor()
-        self.clipper_polydata = vtk.vtkPolyData()
-        self.clipper_mapper = vtk.vtkPolyDataMapper()
+        self.clipping_operation = ClippingOperation(
+            viewer=self,
+            overlay_renderer=self.overlay_renderer,
+        )
+
+        self._clipping_interactor_style = ClippingInteractorStyle(
+            renderer=self.renderer,
+            clipping_operation=self.clipping_operation)
+
         self.clipper_mapper.SetInputData(self.clipper_polydata)
         self.clipper_actor.SetMapper(self.clipper_mapper)
 
@@ -81,9 +96,14 @@ class VolumeViewer(BaseViewer):
         prop.RenderPointsAsSpheresOn()
         prop.SetPointSize(6)
 
+        self.renderer.AddActor(self.clipper_actor)
+
         self._clipper_overlay_observer = self.interactor.AddObserver(
-            "EndInteractionEvent", self._on_camera_interaction
+            "EndInteractionEvent",
+            self._on_camera_interaction
         )
+
+        logger.debug("[VolumeViewer] Clipping operations setup complete")
 
     def eventFilter(self, obj, event):
         """Handle double-click events on VTK widgets."""
@@ -134,6 +154,7 @@ class VolumeViewer(BaseViewer):
     def rotate_camera(self, dx: int, dy: int) -> None:
         """
         Rotate the camera in 3D
+
         :param dx: Horizontal mouse movement (pixels)
         :param dy: Vertical mouse movement (pixels)
         """
@@ -353,48 +374,92 @@ class VolumeViewer(BaseViewer):
 
     def enter_clip_mode(self) -> None:
         """Enter clipping mode"""
-        logger.debug("Entering clipping mode")
+        if self.clipping_operation is None:
+            logger.warning("[VolumeViewer] Clipping operation not initialized")
+            return
+
+        logger.debug("[VolumeViewer] Entering clipping mode")
         self.interactor.SetInteractorStyle(self._clipping_interactor_style)
-        self.clipper.start_region_selection()
+        logger.debug("[VolumeViewer] Switch interactor style to %s",
+                     type(self.interactor.GetInteractorStyle()).__name__)
+        self.clipping_operation.start()
         self.update_view()
 
     def exit_clip_mode(self) -> None:
         """Exit clipping mode"""
-        logger.debug("Exiting clipping mode")
+        if self.clipping_operation is None:
+            return
+
+        logger.debug("[VolumeViewer] Exiting clipping mode")
         self.interactor.SetInteractorStyle(self._default_interactor_style)
-        self.clipper.stop_region_selection()
+        logger.debug("[VolumeViewer] Switch interactor style to %s",
+                     type(self.interactor.GetInteractorStyle()).__name__)
 
     def apply_clipping(self) -> None:
         """Apply the current clipping region."""
-        self.clipper.apply()
+        if self.clipping_operation is None:
+            logger.warning("[VolumeViewer] Clipping operation not initialized")
+            return
+
+        logger.info("[VolumeViewer] Applying clipping region")
+        self.clipping_operation.apply()
+        self.exit_clip_mode()
 
     def cancel_clipping(self) -> None:
-        self.clipper.cancel()
+        """Cancel the current clipping operation and restore the original volume."""
+        if self.clipping_operation is None:
+            logger.warning("[VolumeViewer] Clipping operation not initialized")
+            return
 
-    def add_clip_point(self,
-                       display_xy: tuple[float, float],
-                       world_pt: tuple[float, float, float]) -> None:
-        """Add a point tothe clipping region."""
-        self.clipper_add_selection_point(display_xy, world_pt)
+        logger.info("[VolumeViewer] Canceling clipping operation")
+        self.clipping_operation.cancel()
+        self._clear_clipper_visualization()
+        self.exit_clip_mode()
+
+    def _clear_clipper_visualization(self) -> None:
+        """Clear the clipping region visualization."""
+        logger.debug("[VolumeViewer] Clearing clipping region visualization")
+        self.clipper_polydata.Initialize()
+        self.update_view()
+
+    def enter_clip_result_mode(self) -> None:
+        """
+        Enter clip result mode
+
+        This mode is entered after finalizing teh clip region,
+        allowing user to apply or cancel the clipping operation.
+        """
+        logger.debug("[VolumeViewer] Entering clip result mode")
+        self.interactor.SetInteractorStyle(self._default_interactor_style)
+        logger.debug("[VolumeViewer] Switch interactor style to %s",
+                     type(self.interactor.GetInteractorStyle()).__name__)
+
         self.update_clipper_visualization()
+        self.update_view()
 
     def _on_camera_interaction(self, obj, event):
         """Handle camera interaction events."""
-        self.clipper.on_camera_updated()
+        if self.clipping_operation is None:
+            return
+        self.clipping_operation.on_camera_updated()
 
     def update_clipper_visualization(self) -> None:
         """Update the visual representation of the clipping region."""
-        world_points = self.clipper.get_preview_world_points()
+        if self.clipping_operation is None:
+            return
+
+        world_points = self.clipping_operation.get_preview_world_points()
+
         if not world_points:
             self.clipper_polydata.Initialize()
             self.update_view()
             return
 
-        cam = self.renderer.GetActiveCamera()
-        cam_pos = cam.GetPosition()
+        camera = self.renderer.GetActiveCamera()
+        cam_pos = camera.GetPosition()
         bounds = self.renderer.ComputeVisiblePropBounds()
         diag = math.sqrt(
-            sum(bounds[2 * i + 1] - bounds[2 * i] ** 2 for i in range(3))
+            sum((bounds[2 * i + 1] - bounds[2 * i]) ** 2 for i in range(3))
         ) or 1.0
         offset = 0.002 * diag
 
@@ -406,10 +471,12 @@ class VolumeViewer(BaseViewer):
         for i, pt in enumerate(world_points):
             to_cam = [cam_pos[j] - pt[j] for j in range(3)]
             length = geometry_utils.calculate_norm(to_cam)
+
             if length:
                 disp_pt = [pt[j] + to_cam[j] / length * offset for j in range(3)]
             else:
                 disp_pt = pt
+
             points.InsertNextPoint(*disp_pt)
 
             verts.InsertNextCell(1)

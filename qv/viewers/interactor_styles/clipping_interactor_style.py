@@ -50,7 +50,7 @@ class ClippingInteractorStyle(vtk.vtkInteractorStyleTrackballCamera):
 
         logger.debug("[ClippingInteractorStyle] Point added at screen (%d, %d) -> world %s",
                      x, y, world_pt)
-        self.clipping_operation.add_clip_point(
+        self.clipping_operation.add_selection_point(
             display_xy=(float(x), float(y)),
             world_pt=world_pt
         )

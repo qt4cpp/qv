@@ -138,8 +138,8 @@ class MainWindow(QMainWindow):
 
         status_bar.addPermanentWidget(self.clip_button_widget)
 
-        self.apply_clip_button.clicked.connect(self.volume_viewer.apply_clipping)
-        self.cancel_clip_button.clicked.connect(self.volume_viewer.cancel_clipping)
+        self.apply_clip_button.clicked.connect(self._apply_clipping)
+        self.cancel_clip_button.clicked.connect(self._cancel_clippping)
 
     def _register_shortcuts(self) -> None:
         """Register keyboard shortcuts."""
@@ -173,7 +173,7 @@ class MainWindow(QMainWindow):
         self.volume_viewer.exit_clip_mode()
         self.clip_button_widget.hide()
 
-    def _cancel_clip_mode(self) -> None:
+    def _cancel_clippping(self) -> None:
         """Cancel clipping mode."""
         self.volume_viewer.cancel_clipping()
         self.volume_viewer.exit_clip_mode()
