@@ -139,6 +139,7 @@ class VolumeViewer(BaseViewer):
         :param view: View direction ('front', 'back', 'left', 'right', 'top', 'bottom')
         """
         self.camera_controller.set_preset_view(view)
+        self._set_camera_parallel_from_current()
         self.update_view()
 
     def front_view(self) -> None:
@@ -267,6 +268,7 @@ class VolumeViewer(BaseViewer):
 
         self.camera_controller.extract_patient_matrix_from_volume(self.volume)
         self.camera_controller.reset_to_bounds(self.volume.GetBounds(), view='front')
+        self._set_camera_parallel_from_current()
 
         self.update_transfer_functions()
         self.update_view()
@@ -410,9 +412,9 @@ class VolumeViewer(BaseViewer):
                 else:
                     parallel_scale = cam.GetViewAngle() or 1.0
 
-            cam.ParallelProjectionOn()
-            cam.SetParallelScale(parallel_scale)
-            self.renderer.ResetCameraClippingRange()
+                cam.ParallelProjectionOn()
+                cam.SetParallelScale(parallel_scale)
+                self.renderer.ResetCameraClippingRange()
 
         logger.debug("[VolumeViewer] Entering clipping mode")
         self.interactor.SetInteractorStyle(self._clipping_interactor_style)
@@ -567,4 +569,29 @@ class VolumeViewer(BaseViewer):
             cam.ParallelProjectionOff()
             cam.SetViewAngle(state.view_angle)
             
+        self.renderer.ResetCameraClippingRange()
+
+    def _set_camera_parallel_from_current(self) -> None:
+        """
+        Helper to switch the active camera to parallel projection,
+        computing a suitable parallel scale from the perspective camera parameters or
+        visible bounds.
+        """
+        cam: vtk.vtkCamera = self.renderer.GetActiveCamera()
+        pos = cam.GetPosition()
+        fp = cam.GetFocalPoint()
+        dist = math.dist(pos, fp)
+        if dist == 0.0:
+            dist = 1.0
+        angle_rad = math.radians(cam.GetViewAngle())
+        if angle_rad > 1e-6:
+            parallel_scale = dist * math.tan(angle_rad / 2.0)
+        else:
+            bounds = self.renderer.ComputeVisiblePropBounds()
+            diag = math.sqrt(
+                sum((bounds[2 * i + 1] - bounds[2 * i]) ** 2 for i in range(3))
+            ) or 1.0
+            parallel_scale = diag * 0.5
+        cam.ParallelProjectionOn()
+        cam.SetParallelScale(parallel_scale)
         self.renderer.ResetCameraClippingRange()
