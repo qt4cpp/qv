@@ -1,6 +1,8 @@
 """Volume viewer widget for 3d DICOM images."""
 import logging
 import math
+from dataclasses import dataclass
+from typing import Optional, Tuple
 
 import vtk
 from PySide6 import QtCore
@@ -18,6 +20,17 @@ from viewers.interactor_styles.volume_interactor_style import VolumeViewerIntera
 
 logger = logging.getLogger(__name__)
 
+
+@dataclass
+class _ClipCameraState:
+    """Restoring snapshot to camera state for Clipping mode."""
+    position: Tuple[float, float, float]
+    focal_point: Tuple[float, float, float]
+    view_up: Tuple[float, float, float]
+    view_angle: float
+    parallel_projection: bool
+    parallel_scale: float
+    
 
 class VolumeViewer(BaseViewer):
     """
@@ -49,6 +62,7 @@ class VolumeViewer(BaseViewer):
         self.scalar_range: tuple[float, float] | None = None
         self.color_func: vtk.vtkColorTransferFunction | None = None
         self.opacity_func: vtk.vtkPiecewiseFunction | None = None
+        self._clip_camera_state: Optional[_ClipCameraState] = None
 
         # Window/level attributes
         self._window_settings = WindowSettings(level=0.0, width=1.0)
@@ -378,6 +392,28 @@ class VolumeViewer(BaseViewer):
             logger.warning("[VolumeViewer] Clipping operation not initialized")
             return
 
+        # save camera state once
+        if self._clip_camera_state is None:
+            self._clip_camera_state = self._save_camera_state_for_clipping()
+
+            cam: vtk.vtkCamera = self.renderer.GetActiveCamera()
+
+            if not cam.GetParallelProjection():
+                pos = cam.GetPosition()
+                fp = cam.GetFocalPoint()
+                dist = math.dist(pos, fp)
+
+                angle_rad = math.radians(cam.GetViewAngle())
+
+                if angle_rad > 1e-6:
+                    parallel_scale = dist * math.tan(angle_rad / 2.0)
+                else:
+                    parallel_scale = cam.GetViewAngle() or 1.0
+
+            cam.ParallelProjectionOn()
+            cam.SetParallelScale(parallel_scale)
+            self.renderer.ResetCameraClippingRange()
+
         logger.debug("[VolumeViewer] Entering clipping mode")
         self.interactor.SetInteractorStyle(self._clipping_interactor_style)
         logger.debug("[VolumeViewer] Switch interactor style to %s",
@@ -394,6 +430,10 @@ class VolumeViewer(BaseViewer):
         self.interactor.SetInteractorStyle(self._default_interactor_style)
         logger.debug("[VolumeViewer] Switch interactor style to %s",
                      type(self.interactor.GetInteractorStyle()).__name__)
+
+        if self._clip_camera_state is not None:
+            self._restore_camera_state_for_clipping(self._clip_camera_state)
+            self._clip_camera_state = None
 
     def apply_clipping(self) -> None:
         """Apply the current clipping region."""
@@ -498,3 +538,33 @@ class VolumeViewer(BaseViewer):
         self.clipper_polydata.SetLines(lines)
 
         self.update_view()
+        
+    # =====================================================
+    # Camera helpers for clipping mode
+    # =====================================================
+    
+    def _save_camera_state_for_clipping(self) -> _ClipCameraState:
+        cam: vtk.vtkCamera = self.renderer.GetActiveCamera()
+        return _ClipCameraState(
+            position=cam.GetPosition(),
+            focal_point=cam.GetFocalPoint(),
+            view_up=cam.GetViewUp(),
+            view_angle=cam.GetViewAngle(),
+            parallel_projection=bool(cam.GetParallelProjection()),
+            parallel_scale=cam.GetParallelScale(),
+        )
+    
+    def _restore_camera_state_for_clipping(self, state: _ClipCameraState) -> None:
+        cam: vtk.vtkCamera = self.renderer.GetActiveCamera()
+        cam.SetPosition(*state.position)
+        cam.SetFocalPoint(*state.focal_point)
+        cam.SetViewUp(*state.view_up)
+        
+        if state.parallel_projection:
+            cam.ParallelProjectionOn()
+            cam.SetParallelScale(state.parallel_scale)
+        else:
+            cam.ParallelProjectionOff()
+            cam.SetViewAngle(state.view_angle)
+            
+        self.renderer.ResetCameraClippingRange()

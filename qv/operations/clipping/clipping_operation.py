@@ -78,6 +78,7 @@ class ClippingOperation(BaseOperation):
         # Selection state
         self.clip_points_display: list[tuple[float, float]] = []
         self.clip_points_world: list[tuple[float, float, float]] = []
+        self.clip_points_center: list[tuple[float, float, float]] = []
 
         # VTK objects
         self.clip_loop: vtkImplicitSelectionLoop | None = None
@@ -172,6 +173,7 @@ class ClippingOperation(BaseOperation):
         self.clip_loop = None
         self.clip_points_display.clear()
         self.clip_points_world.clear()
+        self.clip_points_center.clear()
         self.is_active = False
 
         # Clear viewer visualization
@@ -210,8 +212,14 @@ class ClippingOperation(BaseOperation):
         """
         Finalize the clip region and create preview visualization.
 
-        Creates the implicit selection loop and 3D preview actor
-        for visualization before applying the clip.
+        Screen-space based implementation:
+
+        - Uses the user-drawn display (screen) coordinates as the source of truth
+          for the clipping loop.
+        - Projects those display points onto a plane passing through the volume
+          center (or camera focal point) with normal equal to the view direction.
+        - Builds a vtkImplicitSelectionLoop from the projected points and creates
+          a 3D preview by extruding that polygon along the view direction.
         """
         logger.info("[ClippingOperation] Finalizing clip region.")
 
@@ -225,19 +233,21 @@ class ClippingOperation(BaseOperation):
         self._backup_image_data(current_image)
 
         if len(self.clip_points_display) < 3:
-            logger.warning("[ClippingOperation] Need at least 3 points. God %d",
+            logger.warning("[ClippingOperation] Need at least 3 points. Got %d",
                            len(self.clip_points_display))
             self.backup_image = None
             self.clip_loop = None
             return
 
         camera = self._camera_provider()
-        if camera is None:
-            logger.warning("[ClippingOperation] No camera available.")
+        renderer = self._renderer_provider()
+        if camera is None or renderer is None:
+            logger.warning("[ClippingOperation] No camera or renderer available.")
             self.backup_image = None
             self.clip_loop = None
             return
 
+        # View direction (normal of clip plane)
         fp = camera.GetFocalPoint()
         view_vec = geometry_utils.direction_vector(camera.GetPosition(), fp)
         norm = geometry_utils.calculate_norm(view_vec)
@@ -248,35 +258,34 @@ class ClippingOperation(BaseOperation):
             self.clip_loop = None
             return
 
-        view_vec = [v/ norm for v in view_vec]
+        view_vec = [v / norm for v in view_vec]
 
-        # Create VTK points from world points
-        world_points_visual = list(self.clip_points_world)
-        if len(world_points_visual) < 3:
+        #  --- Screen-space clipping core ---
+        # project display points (x, y) onto a singe plane (through volume center)
+        # so the resulting world-space polygon matches wat the user sees.
+        world_points_center = self._project_display_to_center_plane(
+            self.clip_points_display,
+            camera,
+            renderer,
+        )
+        if len(world_points_center) < 3:
             logger.warning("[ClippingOperation] Not enough world points.")
             self.backup_image = None
             self.clip_loop = None
             return
 
-        world_points_center = self._project_points_to_center_plane(
-            world_points_visual,
-            camera,
-            view_vec,
+        self.clip_points_center = list(world_points_center)
+
+        bounds = self.backup_image.GetBounds()
+        back_depth = max(
+            bounds[1] - bounds[0],
+            bounds[3] - bounds[2],
+            bounds[5] - bounds[4]
         )
-
-        # Calculate the max depth from center point to the user-selected points
-        front_depth = 0.0
-        for p_vis, p_ctr in zip(world_points_visual, world_points_center):
-            d = geometry_utils.calculate_distance(p_vis, p_ctr)
-            if d > front_depth:
-                front_depth = d
-
-        # Fallback
-        if front_depth <= 1e-6:
-            front_depth = 0.0
+        front_depth = max(0.0, back_depth - 1e-6)
 
         vtk_points = vtk.vtkPoints()
-        for pt in world_points_center:
+        for pt in self.clip_points_center:
             vtk_points.InsertNextPoint(*pt)
 
         self.clip_loop = vtkImplicitSelectionLoop()
@@ -287,7 +296,7 @@ class ClippingOperation(BaseOperation):
         self._create_preview(vtk_points, view_vec, front_depth)
 
         logger.info("[ClippingOperation] Finalized with %d points.",
-                    len(world_points_center))
+                    len(self.clip_points_center))
 
     def on_camera_updated(self) -> None:
         """
@@ -305,6 +314,9 @@ class ClippingOperation(BaseOperation):
 
         :return: List of world points.
         """
+        if self.clip_points_center:
+            return list(self.clip_points_center)
+
         if self.clip_points_world:
             return list(self.clip_points_world)
 
@@ -325,7 +337,7 @@ class ClippingOperation(BaseOperation):
             self,
             display_points: Sequence[tuple[float, float]],
             world_points: Sequence[tuple[float, float, float]],
-    ) -> None :
+    ) -> None:
         """
         Callback when region selection is closed.
 
@@ -337,6 +349,9 @@ class ClippingOperation(BaseOperation):
             self.reset()
             return
 
+        # Screen-space clipping: display points are the primary source for
+        # building the clip loop. World points are kept only for debugging
+        # or potential future use.
         self.clip_points_display = list(display_points)
         self.clip_points_world = list(world_points)
         self._stop_region_selection()
@@ -352,6 +367,49 @@ class ClippingOperation(BaseOperation):
             if hasattr(self.viewer, "update_clipper_visualization"):
                 self.viewer.update_clipper_visualization()
             self.viewer.enter_clip_result_mode()
+
+    def _project_display_to_center_plane(
+            self,
+            display_points: Sequence[tuple[float, float]],
+            camera: vtk.vtkCamera,
+            renderer: vtk.vtkRenderer,
+    ) -> list[tuple[float, float, float]]:
+        """
+        Project screen-space points onto a plane passing through the volume center
+         (or camera focal point) with normal equal to the view direction.
+
+         This is the core of the screen-space clipping approach:
+         - The user draws the ROI in display coordinates.
+         - We take thos (x, y) pixels and assign them a common depth value.
+           corresponding to the volume center on screen.
+         - We then convert (x, y, depth) back to world coordinates.
+
+         As a result, the polygon used for clipping lies on a single plane
+         orthogonal to the view direction and viaually matches the ROI seen by the user.
+        """
+
+        if not display_points:
+            return []
+
+        # Determine the reference point for depth: volume center or focal point.
+        center = self._get_clip_plane_center(camera)
+
+        renderer.SetWorldPoint(center[0], center[1], center[2], 1.0)
+        renderer.WorldToDisplay()
+        _, _, depth = renderer.GetDisplayPoint()
+
+        projected: list[tuple[float, float, float]] = []
+        for x, y in display_points:
+            renderer.SetDisplayPoint(x, y, depth)
+            renderer.DisplayToWorld()
+            wx, wy, wz, w = renderer.GetWorldPoint()
+            if w != 0.0:
+                wx /= w
+                wy /= w
+                wz /= w
+            projected.append((wx, wy, wz))
+
+        return projected
 
     def _apply_clipping(self) -> vtk.vtkImageData | None:
         """
