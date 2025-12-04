@@ -5,7 +5,7 @@ import queue
 from logging.handlers import QueueHandler, QueueListener, RotatingFileHandler
 from pathlib import Path
 
-from app_settings_manager import AppSettingsManager, RunMode
+from app.app_settings_manager import AppSettingsManager, RunMode
 
 
 def default_log_dir(app_name: str) -> Path:

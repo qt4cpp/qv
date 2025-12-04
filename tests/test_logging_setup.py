@@ -1,8 +1,5 @@
-import os
-import io
 import sys
 import time
-import importlib
 import logging
 from pathlib import Path
 
@@ -41,7 +38,7 @@ def module(tmp_log_dir, monkeypatch):
     """
     if "logging_setup" in sys.modules:
         del sys.modules["logging_setup"]
-    import logging_setup
+    from app import logging_setup
     # default_log_dir(app_name) -> tmp_log_dir
     monkeypatch.setattr(logging_setup, "default_log_dir", lambda app_name: tmp_log_dir)
     return logging_setup

@@ -48,7 +48,7 @@ class VolumeViewerInteractorStyle(vtkInteractorStyleTrackballCamera):
             x, y = iren.GetEventPosition()
             lx, ly = self._last_pos
             dx, dy = x - lx, y - ly
-            self.parent.adjust_window_level(dx, dy)
+            self.parent.adjust_window_settings(dx, dy)
             self._last_pos = (x, y)
         # return
 

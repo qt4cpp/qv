@@ -5,7 +5,9 @@ import vtk
 import numpy as np
 from PySide6 import QtWidgets
 from matplotlib import pyplot as plt
-from vtkmodules.vtkDICOM import vtkDICOMReader, vtkDICOMTag
+from vtkmodules.util.numpy_support import vtk_to_numpy
+
+from core import geometry_utils
 
 
 def load_dicom_series(directory: str) -> vtk.vtkImageData:
@@ -23,6 +25,21 @@ def select_dicom_directory() -> str | None:
     if dialog.exec():
         return dialog.selectedFiles()[0]
     return None
+
+
+def vtk_image_to_numpy(image: vtk.vtkImageData, sampling: int = 1) -> np.ndarray:
+    """
+    the image data convert to a numpy array.
+
+    :return: Numpy array or None.
+    """
+    scalars = image.GetPointData().GetScalars()
+    arr = vtk_to_numpy(scalars)
+
+    if sampling > 1:
+        arr = arr[::sampling]
+
+    return arr
 
 
 def plot_hist_clip(volume, bins=100, lower_pct=25, upper_pct=99):
@@ -72,25 +89,6 @@ def return_dicom_dir():
     return dicom_dir
 
 
-def transform_vector(v, mat):
-    """Transform a vector by a 3x3 matrix."""
-    result = [0.0, 0.0, 0.0]
-    for i in range(3):
-        result[i] = sum(v[j] * mat.GetElement(i, j) for j in range(3))
-    return result
-
-
-def direction_vector(start_point: tuple[float, float, float],
-                     end_point: tuple[float, float, float]) -> tuple[float, float, float]:
-    """Calculate the direction vector between two points."""
-    return end_point[0] - start_point[0], end_point[1] - start_point[1], end_point[2] - start_point[2]
-
-
-def calculate_norm(vector: tuple[float, float, float]) -> float:
-    """Calculate the norm of a vector."""
-    return np.sqrt(vector[0] ** 2 + vector[1] ** 2 + vector[2] ** 2)
-
-
 def get_camera_and_view_direction(
         source: vtk.vtkRenderer | vtk.vtkCamera
 ) -> tuple[vtk.vtkCamera, list[float, float, float], float] | None:
@@ -110,8 +108,8 @@ def get_camera_and_view_direction(
         return None
 
     focal_point = camera.GetFocalPoint()
-    view_vec = direction_vector(camera.GetPosition(), focal_point)
-    norm = calculate_norm(view_vec)
+    view_vec = geometry_utils.direction_vector(camera.GetPosition(), focal_point)
+    norm = geometry_utils.calculate_norm(view_vec)
     if norm == 0:
         return None
 
