@@ -150,7 +150,7 @@ class MainWindow(QMainWindow):
         self.shortcut_mgr.add_callback("right_view", self.volume_viewer.right_view)
         self.shortcut_mgr.add_callback("top_view", self.volume_viewer.top_view)
         self.shortcut_mgr.add_callback("bottom_view", self.volume_viewer.bottom_view)
-        self.shortcut_mgr.add_callback("load_image", self.volume_viewer.load_volume)
+        self.shortcut_mgr.add_callback("open_file", self.open_file)
 
     # =====================================================
     # Menu Actions
