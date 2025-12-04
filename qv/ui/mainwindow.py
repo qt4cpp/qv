@@ -2,7 +2,8 @@ import logging
 from pathlib import Path
 
 from PySide6 import QtCore
-from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QSplitter, QHBoxLayout, QLabel, QPushButton
+from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QSplitter,
+                               QHBoxLayout, QLabel, QPushButton)
 
 from app.app_settings_manager import AppSettingsManager
 from viewers.camera.camera_state import CameraAngle

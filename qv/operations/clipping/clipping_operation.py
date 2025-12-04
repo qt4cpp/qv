@@ -5,6 +5,7 @@ import logging
 from typing import TYPE_CHECKING, Sequence, Callable
 
 import vtk
+from matplotlib.backends import backend_registry
 from vtkmodules.vtkCommonDataModel import vtkImplicitSelectionLoop
 from vtkmodules.vtkRenderingCore import vtkActor
 
@@ -250,15 +251,32 @@ class ClippingOperation(BaseOperation):
         view_vec = [v/ norm for v in view_vec]
 
         # Create VTK points from world points
-        world_points = list(self.clip_points_world)
-        if len(world_points) < 3:
+        world_points_visual = list(self.clip_points_world)
+        if len(world_points_visual) < 3:
             logger.warning("[ClippingOperation] Not enough world points.")
             self.backup_image = None
             self.clip_loop = None
             return
 
+        world_points_center = self._project_points_to_center_plane(
+            world_points_visual,
+            camera,
+            view_vec,
+        )
+
+        # Calculate the max depth from center point to the user-selected points
+        front_depth = 0.0
+        for p_vis, p_ctr in zip(world_points_visual, world_points_center):
+            d = geometry_utils.calculate_distance(p_vis, p_ctr)
+            if d > front_depth:
+                front_depth = d
+
+        # Fallback
+        if front_depth <= 1e-6:
+            front_depth = 0.0
+
         vtk_points = vtk.vtkPoints()
-        for pt in world_points:
+        for pt in world_points_center:
             vtk_points.InsertNextPoint(*pt)
 
         self.clip_loop = vtkImplicitSelectionLoop()
@@ -266,9 +284,10 @@ class ClippingOperation(BaseOperation):
         self.clip_loop.SetNormal(*view_vec)
         self.clip_loop.AutomaticNormalGenerationOff()
 
-        self._create_preview(vtk_points, view_vec)
+        self._create_preview(vtk_points, view_vec, front_depth)
 
-        logger.info("[ClippingOperation] Finalized with %d points.", len(world_points))
+        logger.info("[ClippingOperation] Finalized with %d points.",
+                    len(world_points_center))
 
     def on_camera_updated(self) -> None:
         """
@@ -442,7 +461,12 @@ class ClippingOperation(BaseOperation):
 
         return clipped_img
 
-    def _create_preview(self, vtk_points: vtk.vtkPoints, view_vec: list[float]) -> None:
+    def _create_preview(
+            self,
+            vtk_points: vtk.vtkPoints,
+            view_vec: Sequence[float],
+            front_depth: float
+    ) -> None:
         """
         Create 3D preview of the clipping region.
 
@@ -453,11 +477,19 @@ class ClippingOperation(BaseOperation):
             return
 
         bounds = self.backup_image.GetBounds()
-        depth = max(
+        back_depth = max(
             bounds[1] - bounds[0],
             bounds[3] - bounds[2],
             bounds[5] - bounds[4]
         )
+
+        v_norm = geometry_utils.calculate_norm(view_vec)
+        if v_norm < 1e-6:
+            return
+
+        vx = view_vec[0] / v_norm
+        vy = view_vec[1] / v_norm
+        vz = view_vec[2] / v_norm
 
         poly = vtk.vtkPolyData()
         poly.SetPoints(vtk_points)
@@ -470,20 +502,31 @@ class ClippingOperation(BaseOperation):
         lines.InsertCellPoint(0)
         poly.SetLines(lines)
 
-        extrude = vtk.vtkLinearExtrusionFilter()
-        extrude.SetInputData(poly)
-        extrude.SetVector(view_vec)
-        extrude.SetExtrusionTypeToNormalExtrusion()
-        extrude.SetScaleFactor(depth * 2)
-        extrude.SetCapping(True)
-        extrude.Update()
+        extrude_back = vtk.vtkLinearExtrusionFilter()
+        extrude_back.SetInputData(poly)
+        extrude_back.SetVector(vx, vy, vz)
+        extrude_back.SetExtrusionTypeToNormalExtrusion()
+        extrude_back.SetScaleFactor(back_depth)
+        extrude_back.SetCapping(True)
+
+        extrude_front = vtk.vtkLinearExtrusionFilter()
+        extrude_front.SetInputData(poly)
+        extrude_front.SetVector(-vx, -vy, -vz)
+        extrude_front.SetExtrusionTypeToNormalExtrusion()
+        extrude_front.SetScaleFactor(max(front_depth, 0.0))
+        extrude_front.SetCapping(True)
+
+        appned = vtk.vtkAppendPolyData()
+        appned.AddInputConnection(extrude_back.GetOutputPort())
+        appned.AddInputConnection(extrude_front.GetOutputPort())
+        appned.Update()
 
         mapper3D = vtk.vtkPolyDataMapper()
-        mapper3D.SetInputConnection(extrude.GetOutputPort())
+        mapper3D.SetInputConnection(appned.GetOutputPort())
         self.preview_extrude_actor = vtk.vtkActor()
         self.preview_extrude_actor.SetMapper(mapper3D)
         self.preview_extrude_actor.GetProperty().SetColor(0.5, 0.5, 0)
-        self.preview_extrude_actor.GetProperty().SetOpacity(0.95)
+        self.preview_extrude_actor.GetProperty().SetOpacity(1.0)
 
         renderer = self._renderer_provider()
         if renderer is not None:
@@ -525,3 +568,59 @@ class ClippingOperation(BaseOperation):
         mapper.SetInputData(image_data)
         self.viewer.volume.SetMapper(mapper)
         self._render()
+
+    def _get_clip_plane_center(self, camera: vtk.vtkCamera) -> tuple[float, float, float]:
+        """
+        Get center of the clipping plane from camera
+
+        Prefer the volume center if available, otherwise use the camera focal point.
+        """
+        if hasattr(self.viewer, "get_volume_center"):
+            try:
+                return self.viewer.get_volume_center()
+            except Exception:
+                pass
+        return camera.GetFocalPoint()
+
+    def _project_points_to_center_plane(
+            self,
+            world_points: Sequence[tuple[float, float, float]],
+            camera: vtk.vtkCamera,
+            view_vec: Sequence[float],
+    ) -> Sequence[tuple[float, float, float]]:
+        """
+        Project user-selected world points onto a plane passing through
+        the volume center with normal equal to the view direction.
+
+        This makes the clipping loop lie around the center of the volume
+        instead of near the front surface.
+
+        :param world_points: User-selected world points.
+        :param camera: camera object.
+        :param view_vec: view direction vector.
+        """
+        cam_pos = camera.GetPosition()
+        center = self._get_clip_plane_center(camera)
+
+        cx, cy, cz = center
+        ex, ey, ez = cam_pos
+        nx, ny, nz = view_vec
+
+        projected: list[tuple[float, float, float]] = []
+        for px, py, pz in world_points:
+            dx = px - ex
+            dy = py - ey
+            dz = pz - ez
+
+            denom = nx * dx + ny * dy + nz * dz
+            if abs(denom) < 1e-6:
+                projected.append((px, py, pz))
+                continue
+            num = nx * (cx - ex) + ny * (cy - ey) + nz * (cz - ez)
+            t = num / denom
+
+            qx = ex + t * dx
+            qy = ey + t * dy
+            qz = ez + t * dz
+            projected.append((qx, qy, qz))
+        return projected
