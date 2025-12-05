@@ -23,7 +23,7 @@ class VolumeViewer(BaseViewer):
     """
     Volume viewer widget for 3d DICOM images.
 
-    Profiveds 3d-specific functionality:
+    Provides 3d-specific functionality:
     - Volume rendering with window/level.
     - 3D camera operations (rotation, preset views)
     - Clipping functionality
@@ -67,7 +67,7 @@ class VolumeViewer(BaseViewer):
         self._setup_clipping()
 
     def setup_interactor_style(self) -> None:
-        """Setup the interactor style for volume viewer."""
+        """Set up the interactor style for volume viewer."""
         self._default_interactor_style = VolumeViewerInteractorStyle(self)
         self.interactor.SetInteractorStyle(self._default_interactor_style)
 
@@ -115,7 +115,7 @@ class VolumeViewer(BaseViewer):
         return super().eventFilter(obj, event)
 
     # =====================================================
-    # 3D Camea Operations (VolumeViewer specific)
+    # 3D Camera Operations (VolumeViewer specific)
     # =====================================================
 
     def set_camera_view(self, view: str) -> None:
@@ -190,9 +190,9 @@ class VolumeViewer(BaseViewer):
 
     def get_default_distance(self) -> float:
         """
-        Get teh default camera distance for tthe volume.
+        Get the default camera distance for the volume.
 
-        :return: Default disntace value
+        :return: Default distance value
         :raise RuntimeError: If the volume is not loaded
         """
         if self.volume is None:
@@ -215,7 +215,7 @@ class VolumeViewer(BaseViewer):
         """
         Load a volume from a DICOM directory.
 
-        :param dicom_dir: Path to directory containig DICOM files
+        :param dicom_dir: Path to a directory containing DICOM files
         """
         self.load_volume(dicom_dir)
 
@@ -223,7 +223,7 @@ class VolumeViewer(BaseViewer):
         """
         Load a volume from a DICOM directory.
 
-        :param dicon_dir: Path to directory containing DICOM files
+        :param dicon_dir: Path to a directory containing DICOM files
         """
         logger.info(f"Loading volume from {dicon_dir}")
 
@@ -364,7 +364,7 @@ class VolumeViewer(BaseViewer):
         self.set_zoom_factor(1.0)
 
     def reset_center(self) -> None:
-        """Reset camera focal point to volume center."""
+        """Reset camera focal point to center."""
         center = self.get_volume_center()
         camera = self.renderer.GetActiveCamera()
         camera.SetFocalPoint(*center)
@@ -428,8 +428,8 @@ class VolumeViewer(BaseViewer):
         """
         Enter clip result mode
 
-        This mode is entered after finalizing teh clip region,
-        allowing user to apply or cancel the clipping operation.
+        This mode is entered after finalizing the clip region,
+        allowing the user to apply or cancel the clipping operation.
         """
         logger.debug("[VolumeViewer] Entering clip result mode")
         self.interactor.SetInteractorStyle(self._default_interactor_style)
