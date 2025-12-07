@@ -18,8 +18,6 @@ from viewers.interactor_styles.volume_interactor_style import VolumeViewerIntera
 
 logger = logging.getLogger(__name__)
 
-CLIPPED_EPSILON = 1e-4
-
 
 class VolumeViewer(BaseViewer):
     """
@@ -288,7 +286,6 @@ class VolumeViewer(BaseViewer):
 
         self.opacity_func.RemoveAllPoints()
         self.opacity_func.AddPoint(CLIPPED_SCALAR, 0.0)
-        self.opacity_func.AddPoint(CLIPPED_SCALAR + CLIPPED_EPSILON, 0.0)
         self.opacity_func.AddPoint(min_val, 0.0)
         self.opacity_func.AddPoint(max_val, 1.0)
 
