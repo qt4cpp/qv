@@ -14,6 +14,9 @@ from core.region_selection import RegionSelectionController
 from log_util import log_io
 from operations.base_operation import BaseOperation
 
+CLIPPED_SCALAR = -32768  # value guaranteed to sit outside clinical HUs
+
+
 if TYPE_CHECKING:
     # 型チェック時のみインポートする
     # 相互参照となってしまう。
@@ -480,10 +483,13 @@ class ClippingOperation(BaseOperation):
         :param mask_img: Binary mask image.
         :return: Clipped image data.
         """
+        if not self._has_backup():
+            return None
+
         masker = vtk.vtkImageMask()
         masker.SetInputData(self.backup_image)
         masker.SetMaskInputData(mask_img)
-        masker.SetMaskedOutputValue(0)
+        masker.SetMaskedOutputValue(CLIPPED_SCALAR)
         masker.Update()
 
         clipped_img = vtk.vtkImageData()
@@ -511,7 +517,7 @@ class ClippingOperation(BaseOperation):
         image_stencil.SetInputData(self.backup_image)
         image_stencil.SetStencilConnection(stenciler.GetOutputPort())
         image_stencil.ReverseStencilOn()
-        image_stencil.SetBackgroundValue(0)
+        image_stencil.SetBackgroundValue(CLIPPED_SCALAR)
         image_stencil.Update()
 
         clipped_img = vtk.vtkImageData()

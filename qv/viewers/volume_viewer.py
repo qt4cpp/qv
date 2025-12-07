@@ -11,12 +11,14 @@ from app.app_settings_manager import AppSettingsManager
 from core import geometry_utils
 from core.window_settings import WindowSettings
 from qv.utils.log_util import log_io
-from operations.clipping.clipping_operation import ClippingOperation
+from operations.clipping.clipping_operation import ClippingOperation, CLIPPED_SCALAR
 from viewers.interactor_styles.clipping_interactor_style import ClippingInteractorStyle
 from viewers.base_viewer import BaseViewer
 from viewers.interactor_styles.volume_interactor_style import VolumeViewerInteractorStyle
 
 logger = logging.getLogger(__name__)
+
+CLIPPED_EPSILON = 1e-4
 
 
 class VolumeViewer(BaseViewer):
@@ -49,6 +51,7 @@ class VolumeViewer(BaseViewer):
         self.scalar_range: tuple[float, float] | None = None
         self.color_func: vtk.vtkColorTransferFunction | None = None
         self.opacity_func: vtk.vtkPiecewiseFunction | None = None
+        self.mask_image: vtk.vtkImageData | None = None
 
         # Window/level attributes
         self._window_settings = WindowSettings(level=0.0, width=1.0)
@@ -279,10 +282,13 @@ class VolumeViewer(BaseViewer):
         min_val, max_val = self._window_settings.get_range()
 
         self.color_func.RemoveAllPoints()
+        self.color_func.AddRGBPoint(CLIPPED_SCALAR, 0.0, 0.0, 0.0)
         self.color_func.AddRGBPoint(min_val, 0.0, 0.0, 0.0)
         self.color_func.AddRGBPoint(max_val, 1.0, 1.0, 1.0)
 
         self.opacity_func.RemoveAllPoints()
+        self.opacity_func.AddPoint(CLIPPED_SCALAR, 0.0)
+        self.opacity_func.AddPoint(CLIPPED_SCALAR + CLIPPED_EPSILON, 0.0)
         self.opacity_func.AddPoint(min_val, 0.0)
         self.opacity_func.AddPoint(max_val, 1.0)
 
