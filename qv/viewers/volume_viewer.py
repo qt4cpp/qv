@@ -11,7 +11,7 @@ from app.app_settings_manager import AppSettingsManager
 from core import geometry_utils
 from core.window_settings import WindowSettings
 from qv.utils.log_util import log_io
-from operations.clipping.clipping_operation import ClippingOperation, CLIPPED_SCALAR
+from operations.clipping.clipping_operation import ClippingOperation, CLIPPED_SCALAR, ClipMode
 from viewers.interactor_styles.clipping_interactor_style import ClippingInteractorStyle
 from viewers.base_viewer import BaseViewer
 from viewers.interactor_styles.volume_interactor_style import VolumeViewerInteractorStyle
@@ -376,6 +376,26 @@ class VolumeViewer(BaseViewer):
     # =====================================================
     # Clipping Operations
     # =====================================================
+
+    def start_clip_inside(self) -> None:
+        """
+        Start clipping-inside mode.
+        """
+        if self.clipping_operation is None:
+            logger.warning("[VolumeViewer] Clipping operation not initialized")
+            return
+        self.clipping_operation.set_mode(ClipMode.REMOVE_INSIDE)
+        self.enter_clip_mode()
+
+    def start_clip_outside(self) -> None:
+        """
+        Start clipping-outside mode.
+        """
+        if self.clipping_operation is None:
+            logger.warning("[VolumeViewer] Clipping operation not initialized")
+            return
+        self.clipping_operation.set_mode(ClipMode.REMOVE_OUTSIDE)
+        self.enter_clip_mode()
 
     def enter_clip_mode(self) -> None:
         """Enter clipping mode"""

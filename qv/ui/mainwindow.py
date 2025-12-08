@@ -113,7 +113,8 @@ class MainWindow(QMainWindow):
 
         # Edit menu
         edit_menu = menubar.addMenu("&Edit")
-        edit_menu.addAction("&Clip", self._enter_clip_mode)
+        edit_menu.addAction("&Clip inside", self._start_clip_inside)
+        edit_menu.addAction("&Clip outside", self._start_clip_outside)
 
     def _setup_status_bar(self) -> None:
         """Setup the status bar."""
@@ -162,6 +163,26 @@ class MainWindow(QMainWindow):
         if dicom_dir is None:
             return
         self.volume_viewer.load_data(dicom_dir)
+
+    def _start_clip_inside(self) -> None:
+        """
+        Start `clip inside` mode.
+
+        This sets up the volumeviewer to remove voxels inside the region
+        and shows up Apply/Cancel buttons.
+        """
+        self.volume_viewer.start_clip_inside()
+        self.clip_button_widget.show()
+
+    def _start_clip_outside(self) -> None:
+        """
+        Start `clip outside` mode.
+
+        This sets up the volumeviewer to remove voxels outside the region
+        and shows up Apply/Cancel buttons.
+        """
+        self.volume_viewer.start_clip_outside()
+        self.clip_button_widget.show()
 
     def _enter_clip_mode(self) -> None:
         """Enter clipping mode."""

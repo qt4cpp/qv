@@ -3,6 +3,7 @@ Clipping operation for volume data based on user-defined region.
 """
 import logging
 from typing import TYPE_CHECKING, Sequence, Callable
+from enum import Enum, auto
 
 import vtk
 from matplotlib.backends import backend_registry
@@ -14,13 +15,19 @@ from core.region_selection import RegionSelectionController
 from log_util import log_io
 from operations.base_operation import BaseOperation
 
-CLIPPED_SCALAR = -32768  # value guaranteed to sit outside clinical HUs
+CLIPPED_SCALAR = -16383  # value guaranteed to sit outside clinical HUs
 
 
 if TYPE_CHECKING:
     # 型チェック時のみインポートする
     # 相互参照となってしまう。
     from viewers.volume_viewer import VolumeViewer
+
+
+class ClipMode(Enum):
+    """Enum for clipping modes."""
+    REMOVE_INSIDE = auto()
+    REMOVE_OUTSIDE = auto()
 
 
 logger = logging.getLogger(__name__)
@@ -94,6 +101,7 @@ class ClippingOperation(BaseOperation):
             overlay_renderer,
         )
         self.region_selection.set_closed_callback(self._on_region_closed)
+        self.clip_mode = ClipMode.REMOVE_INSIDE
 
         logger.debug("[ClippingOperation] Initialized.")
 
@@ -188,6 +196,16 @@ class ClippingOperation(BaseOperation):
     # =====================================================
     # Clipping-specific public interface
     # =====================================================
+
+    def set_mode(self, mode: ClipMode) -> None:
+        """Switch between removing inside/outside the selection."""
+        logger.debug("[ClippingOperation] Before setting, current mode to %s", self.clip_mode)
+
+        if mode not in ClipMode:
+            raise ValueError(f"Invalid mode: {mode}")
+
+        self.clip_mode = mode
+        logger.info("[ClippingOperation] Set mode to %s", self.clip_mode)
 
     def add_selection_point(self, display_xy: tuple[float, float],
                             world_pt: tuple[float, float, float]) -> None:
@@ -418,20 +436,24 @@ class ClippingOperation(BaseOperation):
         """
         Apply clipping to the backup image.
 
+        ClipMode.REMOVE_INSIDE: Set the value inside the loop to CLIPPED_SCALAR.
+        ClipMode.REMOVE_OUTSIDE: Set the value outside the loop to CLIPPED_SCALAR.
+
         :return: Clipped image data, or None if failed.
         """
         if not self._has_backup() or self.clip_loop is None:
             return None
 
+        reverse = (self.clip_mode is ClipMode.REMOVE_INSIDE)
         # Try mask-based approach first
-        mask_img = self._build_binary_mask()
+        mask_img = self._build_binary_mask(reverse=reverse)
         if mask_img is not None:
             return self._apply_mask(mask_img)
 
         # Fallback to stencil-based approach
-        return self._apply_stencil()
+        return self._apply_stencil(reverse=reverse)
 
-    def _build_binary_mask(self) -> vtk.vtkImageData | None:
+    def _build_binary_mask(self, reverse: bool) -> vtk.vtkImageData | None:
         """
         Build binary mask from clip loop.
 
@@ -463,17 +485,21 @@ class ClippingOperation(BaseOperation):
         img_stencil = vtk.vtkImageStencil()
         img_stencil.SetInputData(ones.GetOutput())
         img_stencil.SetStencilConnection(stenciler.GetOutputPort())
-        img_stencil.ReverseStencilOn()
+        if reverse:
+            img_stencil.ReverseStencilOn()  # Reverse stencil for REMOVE_INSIDE mode
+        else:
+            img_stencil.ReverseStencilOff()
         img_stencil.SetBackgroundValue(0)
         img_stencil.Update()
 
         mask_img = vtk.vtkImageData()
         mask_img.ShallowCopy(img_stencil.GetOutput())
 
-        logger.debug("[ClippingOperation] Mask cerated: type=%s, range=%s",
+        logger.debug("[ClippingOperation] Mask cerated: type=%s, range=%s (reverse=%s)",
                      mask_img.GetScalarTypeAsString(),
-                     mask_img.GetScalarRange())
-
+                     mask_img.GetScalarRange(),
+                     reverse,
+                     )
         return mask_img
 
     def _apply_mask(self, mask_img: vtk.vtkImageData) -> vtk.vtkImageData | None:
@@ -497,7 +523,7 @@ class ClippingOperation(BaseOperation):
 
         return clipped_img
 
-    def _apply_stencil(self) -> vtk.vtkImageData | None:
+    def _apply_stencil(self, reverse: bool) -> vtk.vtkImageData | None:
         """
         Apply stencil directly (fallback method).
 
@@ -516,7 +542,10 @@ class ClippingOperation(BaseOperation):
         image_stencil = vtk.vtkImageStencil()
         image_stencil.SetInputData(self.backup_image)
         image_stencil.SetStencilConnection(stenciler.GetOutputPort())
-        image_stencil.ReverseStencilOn()
+        if reverse:
+            image_stencil.ReverseStencilOn()
+        else:
+            image_stencil.ReverseStencilOff()
         image_stencil.SetBackgroundValue(CLIPPED_SCALAR)
         image_stencil.Update()
 
