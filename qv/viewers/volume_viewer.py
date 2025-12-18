@@ -1,10 +1,12 @@
 """Volume viewer widget for 3d DICOM images."""
 import logging
 import math
+from typing import Sequence
 
 import vtk
 from PySide6 import QtCore
 from PySide6.QtCore import QEvent
+from fontTools.colorLib import geometry
 
 import qv.utils.vtk_helpers as vtk_helpers
 from app.app_settings_manager import AppSettingsManager
@@ -15,6 +17,12 @@ from operations.clipping.clipping_operation import ClippingOperation, CLIPPED_SC
 from viewers.interactor_styles.clipping_interactor_style import ClippingInteractorStyle
 from viewers.base_viewer import BaseViewer
 from viewers.interactor_styles.volume_interactor_style import VolumeViewerInteractorStyle
+
+from vtkmodules.vtkCommonDataModel import vtkImplicitSelectionLoop
+
+from qv.core.history import Command, HistoryManager
+from qv.core.states import ClippingState
+
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +51,7 @@ class VolumeViewer(BaseViewer):
         """
 
         # Volume-specific attributes
-        self.image: vtk.vtkImageData | None = None
+        self._source_image: vtk.vtkImageData | None = None
         self.volume: vtk.vtkVolume | None = None
         self.volume_property: vtk.vtkVolumeProperty | None = None
         self.scalar_range: tuple[float, float] | None = None
@@ -54,6 +62,18 @@ class VolumeViewer(BaseViewer):
         # Window/level attributes
         self._window_settings = WindowSettings(level=0.0, width=1.0)
         self.delta_per_pixel: float = 1
+
+        # -- Undo/Redo + non-destructive clipping state --
+        # Keep on immutable state and a pure-Python history stack
+        self._source_image: vtk.vtkImageData | None = None
+        self.clipping_state: ClippingState = ClippingState.default()
+        self.history: HistoryManager = HistoryManager(max_undo=10)
+
+        # Keep reference to pipeline objects to avoid premature GC.
+        # Some VTK pipelines can break if intermediate objects are garbage collected.
+        self._clipping_loop: vtkImplicitSelectionLoop | None = None
+        self._clipping_stenciler: vtk.vtkImplicitFunctionToImageStencil | None = None
+        self._clipping_image_stencil: vtk.vtkImageStencil | None = None
 
         # Clipping operation and visualization
         self.clipping_operation: ClippingOperation | None = None
@@ -228,15 +248,15 @@ class VolumeViewer(BaseViewer):
         """
         logger.info(f"Loading volume from {dicon_dir}")
 
-        self.image = vtk_helpers.load_dicom_series(dicon_dir)
-        self.scalar_range = self.image.GetScalarRange()
+        self._source_image = vtk_helpers.load_dicom_series(dicon_dir)
+        self.scalar_range = self._source_image.GetScalarRange()
 
         level = round(min(4096.0, sum(self.scalar_range) / 2.0))
         width = round(min(level / 2.0, 1024.0))
         self._window_settings = WindowSettings(level=level, width=width)
 
         mapper = vtk.vtkGPUVolumeRayCastMapper()
-        mapper.SetInputData(self.image)
+        mapper.SetInputData(self._source_image)
 
         self.color_func = vtk.vtkColorTransferFunction()
         self.opacity_func = vtk.vtkPiecewiseFunction()
@@ -260,13 +280,47 @@ class VolumeViewer(BaseViewer):
         self.update_transfer_functions()
         self.update_view()
 
+        # Reset history and clipping state when data changes (spec requirement)
+        self.history.clear()
+        self.set_clipping_state(ClippingState.default())
+
         self.dataLoaded.emit()
         self.windowSettingsChanged.emit(self._window_settings)
 
         logger.info(
             "Volume loaded: extent=%s spacing=%s origin=%s",
-            self.image.GetExtent(), self.image.GetSpacing(), self.image.GetOrigin()
+            self._source_image.GetExtent(), self._source_image.GetSpacing(), self._source_image.GetOrigin()
         )
+
+    # =====================================================
+    # Undo / Redo
+    # =====================================================
+
+    def can_undo(self) -> bool:
+        """Return True if undo is possible."""
+        return self.history.can_undo()
+
+    def can_redo(self) -> bool:
+        """Return True if redo is possible."""
+        return self.history.can_redo()
+
+    def undo(self) -> None:
+        """
+        Undo the last applied clipping state.
+        """
+        try:
+            self.history.undo(self.set_clipping_state)
+        except Exception:
+            logger.exception("[VolumeViewer] Undo failed (ignored).")
+
+    def redo(self) -> None:
+        """
+        Redo the last undone clipping state.
+        """
+        try:
+            self.history.redo(self.set_clipping_state)
+        except Exception:
+            logger.exception("[VolumeViewer] Redo failed (ignored).")
 
     # =====================================================
     # Transfer Function (Window Settings)
@@ -420,26 +474,210 @@ class VolumeViewer(BaseViewer):
         logger.debug("[VolumeViewer] Switch interactor style to %s",
                      type(self.interactor.GetInteractorStyle()).__name__)
 
+        # =====================================================
+        # Clipping Operations
+        # =====================================================
+
     def apply_clipping(self) -> None:
-        """Apply the current clipping region."""
+        """
+        Convert the current preview region into a presistent state and
+         record it in the history.
+        """
         if self.clipping_operation is None:
             logger.warning("[VolumeViewer] Clipping operation not initialized")
             return
 
-        logger.info("[VolumeViewer] Applying clipping region")
-        self.clipping_operation.apply()
+        # Fetch the polygon points collected by the interaction layer.
+        disp_pts = list(getattr(self.clipping_operation, 'clip_points_display', []) or [])
+        if len(disp_pts) < 3:
+            logger.info("[VolumeViewer] Polygon is incomplete; skipping apply.")
+            self.exit_clip_mode()
+            return
+
+        before = self.clipping_state
+        polygon_ndc = self._display_points_to_ndc(disp_pts)
+
+        after = ClippingState(
+            enabled=True,
+            mode=getattr(self.clipping_operation, 'clip_mode', ClipMode.REMOVE_INSIDE),
+            polygon_ndc=polygon_ndc,
+        )
+
+        logger.info("[VolumeViewer] Applying clipping state via history manager.")
+        try:
+            self.history.do(Command(before=before, after=after), self.set_clipping_state)
+        except Exception:
+            logger.exception("[VolumeViewer] Failed to apply clipping state.")
+
+        # Cleanup preview actors and mode state
+        self._clear_clipper_visualization()
+        try:
+            self.clipping_operation.reset()
+        except Exception:
+            logger.exception("[VolumeViewer] Failed to reset clipping operation.")
         self.exit_clip_mode()
 
     def cancel_clipping(self) -> None:
-        """Cancel the current clipping operation and restore the original volume."""
+        """Discard the current selection without recording any history."""
         if self.clipping_operation is None:
             logger.warning("[VolumeViewer] Clipping operation not initialized")
             return
 
-        logger.info("[VolumeViewer] Canceling clipping operation")
-        self.clipping_operation.cancel()
+        logger.info("[VolumeViewer] Canceling clipping operation.")
+        try:
+            self.clipping_operation.reset()
+        except Exception:
+            logger.debug("[VolumeViewer] Clipping operation reset failed.")
+
         self._clear_clipper_visualization()
         self.exit_clip_mode()
+
+    def set_clipping_state(self, state: ClippingState) -> None:
+        """
+        Construct and apply the VTK clipping pipeline based on the provided state.
+
+        This method handles coordinate transformation (NDC -> World) and
+         updates the voluem mapper input.
+        """
+        self.clipping_state = state
+
+        if self.volume is None or self._source_image is None:
+            return
+
+        mapper = self.volume.GetMapper()
+        if mapper is None:
+            return
+
+        try:
+            if (not state.enabled) or (not state.polygon_ndc):
+                mapper.SetInputData(self._source_image)
+                self._drop_clipping_pipeline_refs()
+                self.update_view()
+                return
+
+            # Step 1: Recover screen pixels from NDC
+            disp_pts = self._ndc_points_to_display(state.polygon_ndc)
+
+            # Step 2: Project points to 3D. We use the 'center plane' approach
+            # to ensure the world-space polygon matches the user's screen-space drawing.
+            camera = self.renderer.GetActiveCamera()
+            world_pts = self._project_display_to_center_plane(disp_pts, )
+            if len(world_pts) < 3:
+                mapper.SetInputData(self._source_image)
+                self._drop_clipping_pipeline_refs()
+                self.update_view()
+                return
+
+            # Step 3: Define the clipping boundary using on implicit selection loop.
+            camera = self.renderer.GetActiveCamera()
+            fp = camera.GetFocalPoint()
+            view_vec = geometry_utils.direction_vector(camera.GetPosition(), fp)
+            norm = geometry_utils.calculate_norm(view_vec) or 1.0
+            view_dir = [v / norm for v in view_vec]
+
+            vtk_points = vtk.vtkPoints()
+            for p in world_pts:
+                vtk_points.InsertNextPoint(*p)
+
+            loop = vtk.vtkImplicitSelectionLoop()
+            loop.SetLoop(vtk_points)
+            loop.SetNormal(*view_dir)
+            loop.AutomaticNormalGenerationOff()
+
+            # Step 4: ;build the stencil pipeline.
+            # This creates a binary mask in the shape of our extruded polygon.
+            stenciler = vtk.vtkImplicitFunctionToImageStencil()
+            stenciler.SetInput(loop)
+            stenciler.SetOutputSpacing(self._source_image.GetSpacing())
+            stenciler.SetOutputOrigin(self._source_image.GetOrigin())
+            stenciler.SetOutputWholeExtent(self._source_image.GetExtent())
+            stenciler.Update()
+
+            # Step 5: Mask the source image.
+            # Voxels inside/outside the stencil are replaced with CLIPPED_SCALAR.
+            img_stencil = vtk.vtkImageStencil()
+            img_stencil.SetInputData(self._source_image)
+            img_stencil.SetStencilConnection(stenciler.GetOutputPort())
+
+            if state.mode is ClipMode.REMOVE_INSIDE:
+                img_stencil.ReverseStencilOn()
+            else:
+                img_stencil.ReverseStencilOff()
+
+            img_stencil.SetBackgroundValue(CLIPPED_SCALAR)
+            img_stencil.Update()
+
+            self._clipping_loop = loop
+            self._clipping_stenciler = stenciler
+            self._clipping_image_stencil = img_stencil
+
+            # Update the rendering pipeline.
+            mapper.SetInputConnection(img_stencil.GetOutputPort())
+            mapper.Modified()
+            self.update_view()
+
+        except Exception:
+            logger.exception(
+                "[VolumeViewer] Rendering pipeline failed; falling back to original image.")
+            mapper.SetInputData(self._source_image)
+            self._drop_clipping_pipeline_refs()
+            self.update_view()
+
+    def _drop_clipping_pipeline_refs(self) -> None:
+        """Clear the reference to the active clipping filters."""
+        self._clipping_loop = None
+        self._clipping_stenciler = None
+        self._clipping_img_stencil = None
+
+    def _display_points_to_ndc(
+            self,
+            display_points: Sequence[tuple[float, float]],
+    ) -> tuple[tuple[float, float], ...]:
+        """Convert pixel coordinates to 0..1 range (origin bottom-left)."""
+        size = self.vtk_widget.size()
+        w = max(1, int(size.width()))
+        h = max(1, int(size.height()))
+        return tuple((float(x) / w, float(y) / h) for x, y in display_points)
+
+    def _ndc_points_to_display(
+            self,
+            ndc_points: Sequence[tuple[float, float]],
+    ) -> list[tuple[float, float]]:
+        """Restore pixel coordinates from 0..1 range (origin bottom-left)."""
+        size = self.vtk_widget.size()
+        w = max(1, int(size.width()))
+        h = max(1, int(size.height()))
+        return [(float(nx) * w, float(ny) * h) for nx, ny in ndc_points]
+
+    def _project_display_to_center_plane(
+            self,
+            display_points: Sequence[tuple[float, float]],
+    ) -> list[tuple[float, float, float]]:
+        """
+        Project screen pixels onto a 3D plane passing through the volume's center.
+        Ensures the restored world-space polygon matches the user's initial screen selection.
+        """
+        if not display_points:
+            return []
+
+        center = self.get_volume_center()
+
+        # Get the screen depth (Z-buffer value) of the volume center.
+        self.renderer.SetWorldPoint(center[0], center[1], center[2], 1.0)
+        self.renderer.WorldToDisplay()
+        _, _, depth = self.renderer.GetDisplayPoint()
+
+        projected: list[tuple[float, float, float]] = []
+        for x, y in display_points:
+            self.renderer.SetDisplayPoint(float(x), float(y), float(depth))
+            self.renderer.DisplayToWorld()
+            wx, wy, wz, w = self.renderer.GetWorldPoint()
+            if w != 0.0:
+                wx /= w
+                wy /= w
+                wz /= w
+            projected.append((float(wx), float(wy), float(wz)))
+        return projected
 
     def _clear_clipper_visualization(self) -> None:
         """Clear the clipping region visualization."""
