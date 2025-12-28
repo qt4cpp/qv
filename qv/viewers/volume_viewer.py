@@ -1,7 +1,7 @@
 """Volume viewer widget for 3d DICOM images."""
 import logging
 import math
-from typing import Sequence
+from typing import Sequence, OrderedDict
 
 import vtk
 from PySide6 import QtCore
@@ -68,6 +68,9 @@ class VolumeViewer(BaseViewer):
         self._source_image: vtk.vtkImageData | None = None
         self.clipping_state: ClippingState = ClippingState.default()
         self.history: HistoryManager = HistoryManager(max_undo=10)
+
+        self._clipping_result_cache: OrderedDict[ClippingState, vtk.vtkImageData] = OrderedDict()
+        self._clipping_result_cache_max = 3
 
         # Keep reference to pipeline objects to avoid premature GC.
         # Some VTK pipelines can break if intermediate objects are garbage collected.
@@ -493,14 +496,25 @@ class VolumeViewer(BaseViewer):
             logger.info("[VolumeViewer] Polygon is incomplete; skipping apply.")
             self.exit_clip_mode()
             return
+        world_pts = self._project_display_to_center_plane(disp_pts)
+        if len(world_pts) < 3:
+            logger.info("[VolumeViewer] Failed to project polygon; skipping apply.")
+            self.exit_clip_mode()
+            return
+
+        camera = self.renderer.GetActiveCamera()
+        fp = camera.GetFocalPoint()
+        view_vec = geometry_utils.direction_vector(camera.GetPosition(), fp)
+        norm = geometry_utils.calculate_norm(view_vec) or 1.0
+        normal_world = (view_vec[0] / norm, view_vec[1] / norm, view_vec[2] / norm)
+
+        mode = getattr(self.clipping_operation, 'clip_mode', ClipMode.REMOVE_INSIDE)
 
         before = self.clipping_state
-        polygon_ndc = self._display_points_to_ndc(disp_pts)
-
-        after = ClippingState(
-            enabled=True,
-            mode=getattr(self.clipping_operation, 'clip_mode', ClipMode.REMOVE_INSIDE),
-            polygon_ndc=polygon_ndc,
+        after = before.add_region(
+            mode=mode,
+            polygon_world=tuple((float(x), float(y), float(z)) for (x, y, z) in world_pts),
+            normal_world=tuple(float(v) for v in normal_world),
         )
 
         logger.info("[VolumeViewer] Applying clipping state via history manager.")
@@ -549,70 +563,29 @@ class VolumeViewer(BaseViewer):
             return
 
         try:
-            if (not state.enabled) or (not state.polygon_ndc):
+            if not state.enabled:
                 mapper.SetInputData(self._source_image)
-                self._drop_clipping_pipeline_refs()
+                mapper.Modified()
                 self.update_view()
                 return
 
-            # Step 1: Recover screen pixels from NDC
-            disp_pts = self._ndc_points_to_display(state.polygon_ndc)
-
-            # Step 2: Project points to 3D. We use the 'center plane' approach
-            # to ensure the world-space polygon matches the user's screen-space drawing.
-            camera = self.renderer.GetActiveCamera()
-            world_pts = self._project_display_to_center_plane(disp_pts, )
-            if len(world_pts) < 3:
-                mapper.SetInputData(self._source_image)
-                self._drop_clipping_pipeline_refs()
+            cached = self._get_cached_clipping_result(state)
+            if cached is not None:
+                mapper.SetInputData(cached)
+                mapper.Modified()
                 self.update_view()
                 return
 
-            # Step 3: Define the clipping boundary using on implicit selection loop.
-            camera = self.renderer.GetActiveCamera()
-            fp = camera.GetFocalPoint()
-            view_vec = geometry_utils.direction_vector(camera.GetPosition(), fp)
-            norm = geometry_utils.calculate_norm(view_vec) or 1.0
-            view_dir = [v / norm for v in view_vec]
+            # cache miss -> build result once, then cache it
+            result = self._build_clipped_image_from_state(state)
+            if result is None:
+                mapper.SetInputData(self._source_image)
+                mapper.Modified()
+                self.update_view()
+                return
 
-            vtk_points = vtk.vtkPoints()
-            for p in world_pts:
-                vtk_points.InsertNextPoint(*p)
-
-            loop = vtk.vtkImplicitSelectionLoop()
-            loop.SetLoop(vtk_points)
-            loop.SetNormal(*view_dir)
-            loop.AutomaticNormalGenerationOff()
-
-            # Step 4: ;build the stencil pipeline.
-            # This creates a binary mask in the shape of our extruded polygon.
-            stenciler = vtk.vtkImplicitFunctionToImageStencil()
-            stenciler.SetInput(loop)
-            stenciler.SetOutputSpacing(self._source_image.GetSpacing())
-            stenciler.SetOutputOrigin(self._source_image.GetOrigin())
-            stenciler.SetOutputWholeExtent(self._source_image.GetExtent())
-            stenciler.Update()
-
-            # Step 5: Mask the source image.
-            # Voxels inside/outside the stencil are replaced with CLIPPED_SCALAR.
-            img_stencil = vtk.vtkImageStencil()
-            img_stencil.SetInputData(self._source_image)
-            img_stencil.SetStencilConnection(stenciler.GetOutputPort())
-
-            if state.mode is ClipMode.REMOVE_INSIDE:
-                img_stencil.ReverseStencilOn()
-            else:
-                img_stencil.ReverseStencilOff()
-
-            img_stencil.SetBackgroundValue(CLIPPED_SCALAR)
-            img_stencil.Update()
-
-            self._clipping_loop = loop
-            self._clipping_stenciler = stenciler
-            self._clipping_image_stencil = img_stencil
-
-            # Update the rendering pipeline.
-            mapper.SetInputConnection(img_stencil.GetOutputPort())
+            self._put_cached_clipping_result(state, result)
+            mapper.SetInputData(result)
             mapper.Modified()
             self.update_view()
 
@@ -623,11 +596,70 @@ class VolumeViewer(BaseViewer):
             self._drop_clipping_pipeline_refs()
             self.update_view()
 
+    def _get_cached_clipping_result(self, state: ClippingState) -> vtk.vtkImageData | None:
+        hit = self._clipping_result_cache.get(state)
+        if hit is None:
+            return None
+
+        self._clipping_result_cache.move_to_end(state)
+        return hit
+
+    def _put_cached_clipping_result(self, state: ClippingState, img: vtk.vtkImageData) -> None:
+        self._clipping_result_cache[state] = img
+        self._clipping_result_cache.move_to_end(state)
+        while len(self._clipping_result_cache) > self._clipping_result_cache_max:
+            self._clipping_result_cache.popitem(last=False)
+
+    def _build_clipped_image_from_state(self, state: ClippingState) -> vtk.vtkImageData | None:
+        """Build a clipped vtkImageData by applying all regions cumulatively.
+        This is expensive, so we cache the result for undo/redo speed."""
+        if self._source_image is None:
+            return None
+
+        current = vtk.vtkImageData()
+        current.DeepCopy(self._source_image)
+
+        for region in state.regions:
+            if len(region.polygon_world) < 3:
+                continue
+
+            vtk_points = vtk.vtkPoints()
+            for p in region.polygon_world:
+                vtk_points.InsertNextPoint(*p)
+
+            loop = vtk.vtkImplicitSelectionLoop()
+            loop.SetLoop(vtk_points)
+            loop.SetNormal(*region.normal_world)
+            loop.AutomaticNormalGenerationOff()
+
+            stenciler = vtk.vtkImplicitFunctionToImageStencil()
+            stenciler.SetInput(loop)
+            stenciler.SetOutputOrigin(current.GetOrigin())
+            stenciler.SetOutputSpacing(current.GetSpacing())
+            stenciler.SetOutputWholeExtent(current.GetExtent())
+
+            img_stencil = vtk.vtkImageStencil()
+            img_stencil.SetInputData(current)
+            img_stencil.SetStencilConnection(stenciler.GetOutputPort())
+            if region.mode == ClipMode.REMOVE_INSIDE:
+                img_stencil.ReverseStencilOn()
+            else:
+                img_stencil.ReverseStencilOff()
+            img_stencil.SetBackgroundValue(CLIPPED_SCALAR)
+            img_stencil.Update()
+
+            next_img = vtk.vtkImageData()
+            next_img.DeepCopy(img_stencil.GetOutput())
+            current = next_img
+
+        return current
+
     def _drop_clipping_pipeline_refs(self) -> None:
         """Clear the reference to the active clipping filters."""
         self._clipping_loop = None
         self._clipping_stenciler = None
         self._clipping_img_stencil = None
+        self._cliping_pipelines = []
 
     def _display_points_to_ndc(
             self,
