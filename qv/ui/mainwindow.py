@@ -2,6 +2,7 @@ import logging
 from pathlib import Path
 
 from PySide6 import QtCore
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QSplitter,
                                QHBoxLayout, QLabel, QPushButton)
 
@@ -116,6 +117,51 @@ class MainWindow(QMainWindow):
         edit_menu.addAction("&Clip inside", self._start_clip_inside)
         edit_menu.addAction("&Clip outside", self._start_clip_outside)
 
+        edit_menu.addSeparator()
+
+        self.undo_action = QAction("&Undo", self)
+        self.undo_action.setShortcut("Ctrl+Z")
+        self.undo_action.triggered.connect(self._undo)
+        edit_menu.addAction(self.undo_action)
+
+        self.redo_action = QAction("&Redo", self)
+        self.redo_action.setShortcut("Ctrl+Y")
+        self.redo_action.triggered.connect(self._redo)
+        edit_menu.addAction(self.redo_action)
+
+        self._update_undo_redo_enabled()
+
+    def _update_undo_redo_enabled(self):
+        """Synchronize the enabled status of Undo/Redo actions with the history manager."""
+        if hasattr(self, "undo_action"):
+            self.undo_action.setEnabled(self.volume_viewer.history.can_undo())
+        if hasattr(self, "redo_action"):
+            self.redo_action.setEnabled(self.volume_viewer.history.can_redo())
+
+    def _undo(self) -> None:
+        """Trigger undo operation."""
+        self.volume_viewer.undo()
+        self._update_undo_redo_enabled()
+
+    def _redo(self) -> None:
+        """Trigger redo operation."""
+        self.volume_viewer.redo()
+        self._update_undo_redo_enabled()
+
+    # --- Button Hnadler ---
+    # These handlers must call _update_undo_redo_enabled because they modify history.
+
+    def _apply_clipping(self) -> None:
+        """Confirm the selection and push to history."""
+        self.volume_viewer.apply_clipping()
+        self.clip_button_widget.hide()
+        self._update_undo_redo_enabled()
+
+    def _cancel_clippping(self) -> None:
+        """Cancel the current clipping operation and restore the original volume."""
+        self.volume_viewer.cancel_clipping()
+        self._update_undo_redo_enabled()
+
     def _setup_status_bar(self) -> None:
         """Setup the status bar."""
         status_bar = self.statusBar()
@@ -189,18 +235,6 @@ class MainWindow(QMainWindow):
         self.volume_viewer.enter_clip_mode()
         self.clip_button_widget.show()
 
-    def _apply_clipping(self) -> None:
-        """Apply clipping mode."""
-        self.volume_viewer.apply_clipping()
-        self.volume_viewer.exit_clip_mode()
-        self.clip_button_widget.hide()
-
-    def _cancel_clippping(self) -> None:
-        """Cancel clipping mode."""
-        self.volume_viewer.cancel_clipping()
-        self.volume_viewer.exit_clip_mode()
-        self.clip_button_widget.hide()
-
     # =====================================================
     # Signal Handlers
     # =====================================================
@@ -244,12 +278,14 @@ class MainWindow(QMainWindow):
         """Handle data loaded event."""
         logger.debug("Data loaded, updating histogram")
 
-        if self.volume_viewer.image is None:
+        if self.volume_viewer._source_image is None:
             return
 
-        self.histgram_widget.set_data(vtk_helpers.vtk_image_to_numpy(self.volume_viewer.image))
+        self.histgram_widget.set_data(vtk_helpers.vtk_image_to_numpy(self.volume_viewer._source_image))
 
         if self.volume_viewer.volume_property:
             self.histgram_widget.update_opacity_curve(
                 self.volume_viewer.volume_property.GetScalarOpacity()
             )
+
+        self._update_undo_redo_enabled()
