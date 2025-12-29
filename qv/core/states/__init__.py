@@ -1,3 +1,3 @@
-from .clipping_state import ClippingState, ClipRegion
+from .clipping_state import ClippingState
 
-__all__ = ["ClippingState", "ClipRegion"]
+__all__ = ["ClippingState"]

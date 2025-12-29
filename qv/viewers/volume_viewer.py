@@ -1,12 +1,16 @@
 """Volume viewer widget for 3d DICOM images."""
 import logging
 import math
-from typing import Sequence, OrderedDict
+import zlib
+from typing import Sequence
+from collections import OrderedDict
 
+import numpy as np
 import vtk
 from PySide6 import QtCore
 from PySide6.QtCore import QEvent
 from fontTools.colorLib import geometry
+from vtkmodules.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 
 import qv.utils.vtk_helpers as vtk_helpers
 from app.app_settings_manager import AppSettingsManager
@@ -66,11 +70,16 @@ class VolumeViewer(BaseViewer):
         # -- Undo/Redo + non-destructive clipping state --
         # Keep on immutable state and a pure-Python history stack
         self._source_image: vtk.vtkImageData | None = None
+
         self.clipping_state: ClippingState = ClippingState.default()
         self.history: HistoryManager = HistoryManager(max_undo=10)
 
         self._clipping_result_cache: OrderedDict[ClippingState, vtk.vtkImageData] = OrderedDict()
         self._clipping_result_cache_max = 3
+
+        # Cumulative mask image (uint8, 0=keep, 255=hide)
+        self._clip_mask_image: vtk.vtkImageData | None = None
+        self._masker: vtk.vtkImageMask | None = None
 
         # Keep reference to pipeline objects to avoid premature GC.
         # Some VTK pipelines can break if intermediate objects are garbage collected.
@@ -94,6 +103,40 @@ class VolumeViewer(BaseViewer):
         """Set up the interactor style for volume viewer."""
         self._default_interactor_style = VolumeViewerInteractorStyle(self)
         self.interactor.SetInteractorStyle(self._default_interactor_style)
+
+    def _init_mask_pipeline(self) -> None:
+        """Initialize the masking pipeline."""
+        if self._source_image is None or self.volume is None:
+            return
+
+        # Create zero mask (all visible)
+        mask = vtk.vtkImageData()
+        mask.DeepCopy(self._source_image)
+        mask.GetPointData().SetScalars(None)
+
+        ones = vtk.vtkImageThreshold()
+        ones.SetInputData(self._source_image)
+        ones.ReplaceInOn()
+        ones.ReplaceOutOn()
+        ones.ThresholdBetween(-1e38, 1e38)
+        ones.SetInValue(255)
+        ones.SetOutValue(255)
+        ones.SetOutputScalarTypeToUnsignedChar()
+        ones.Update()
+
+        self._clip_mask_image = vtk.vtkImageData()
+        self._clip_mask_image.ShallowCopy(ones.GetOutput())
+
+        # Create masker pipeline once
+        self._masker = vtk.vtkImageMask()
+        self._masker.SetInputData(self._source_image)
+        self._masker.SetMaskInputData(self._clip_mask_image)
+        self._masker.SetMaskedOutputValue(CLIPPED_SCALAR)
+        self._masker.Update()
+
+        mapper = self.volume.GetMapper()
+        mapper.SetInputConnection(self._masker.GetOutputPort())
+        mapper.Modified()
 
     def _setup_clipping(self) -> None:
         """Setup clipping functionality and visualization."""
@@ -275,6 +318,28 @@ class VolumeViewer(BaseViewer):
         self.volume.SetProperty(self.volume_property)
 
         self.renderer.AddVolume(self.volume)
+        
+        self._init_mask_pipeline()
+
+        if self._clip_mask_image is None:
+            logger.warning("[VolumeViewer] Failed to initialize clipping mask pipeline.")
+        else:
+            logger.info(
+                "[VolumeViewer] mask scalar range after init: %s (type=%s)",
+                self._clip_mask_image.GetScalarRange(),
+                self._clip_mask_image.GetScalarTypeAsString(),
+            )
+
+        if self._masker is None:
+            logger.warning("[VolumeViewer] Failed to initialize clipping masker.")
+        else:
+            out = self._masker.GetOutput()
+            if out is not None:
+                logger.info(
+                    "[VolumeViewer] masker output scalar range after init: %s (type=%s)",
+                    out.GetScalarRange(),
+                    out.GetScalarTypeAsString(),
+                )
 
         self.camera_controller.extract_patient_matrix_from_volume(self.volume)
         self.camera_controller.reset_to_bounds(self.volume.GetBounds(), view='front')
@@ -477,9 +542,9 @@ class VolumeViewer(BaseViewer):
         logger.debug("[VolumeViewer] Switch interactor style to %s",
                      type(self.interactor.GetInteractorStyle()).__name__)
 
-        # =====================================================
-        # Clipping Operations
-        # =====================================================
+    # =====================================================
+    # Clipping Operations
+    # =====================================================
 
     def apply_clipping(self) -> None:
         """
@@ -489,33 +554,48 @@ class VolumeViewer(BaseViewer):
         if self.clipping_operation is None:
             logger.warning("[VolumeViewer] Clipping operation not initialized")
             return
+        if self._source_image is None or self.volume is None:
+            return
+        if self._clip_mask_image is None:
+            self._init_mask_pipeline()
+            if self._clip_mask_image is None or self._masker is None:
+                return
 
-        # Fetch the polygon points collected by the interaction layer.
         disp_pts = list(getattr(self.clipping_operation, 'clip_points_display', []) or [])
         if len(disp_pts) < 3:
             logger.info("[VolumeViewer] Polygon is incomplete; skipping apply.")
             self.exit_clip_mode()
             return
-        world_pts = self._project_display_to_center_plane(disp_pts)
-        if len(world_pts) < 3:
-            logger.info("[VolumeViewer] Failed to project polygon; skipping apply.")
+
+        # Restore current mask
+        before = self.clipping_state
+
+        polygon_ndc = self._display_points_to_ndc(disp_pts)
+        mode = getattr(self.clipping_operation, 'clip_mode', ClipMode.REMOVE_INSIDE)
+
+        region_keep_mask = self._build_keep_mask_from_polygon_ndc(polygon_ndc, mode)
+        if region_keep_mask is None:
+            logger.warning("[VolumeViewer] Failed to build region hide mask.")
             self.exit_clip_mode()
             return
 
-        camera = self.renderer.GetActiveCamera()
-        fp = camera.GetFocalPoint()
-        view_vec = geometry_utils.direction_vector(camera.GetPosition(), fp)
-        norm = geometry_utils.calculate_norm(view_vec) or 1.0
-        normal_world = (view_vec[0] / norm, view_vec[1] / norm, view_vec[2] / norm)
+        self._accumulate_mask_and(region_keep_mask)
 
-        mode = getattr(self.clipping_operation, 'clip_mode', ClipMode.REMOVE_INSIDE)
+        if self._clip_mask_image is not None:
+            logger.debug(
+                "[VolumeViewer] mask scalar range after accumulate: %s (type=%s)",
+                self._clip_mask_image.GetScalarRange(),
+                self._clip_mask_image.GetScalarTypeAsString(),
+            )
+        if self._masker is not None and self._masker.GetOutput() is not None:
+            out = self._masker.GetOutput()
+            logger.debug(
+                "[VolumeViewer] _masker output range after accumulate (before state save): %s (type=%s)",
+                out.GetScalarRange(),
+                out.GetScalarTypeAsString(),
+            )
 
-        before = self.clipping_state
-        after = before.add_region(
-            mode=mode,
-            polygon_world=tuple((float(x), float(y), float(z)) for (x, y, z) in world_pts),
-            normal_world=tuple(float(v) for v in normal_world),
-        )
+        after = ClippingState(mask_zlib=self._compress_current_mask())
 
         logger.info("[VolumeViewer] Applying clipping state via history manager.")
         try:
@@ -558,43 +638,167 @@ class VolumeViewer(BaseViewer):
         if self.volume is None or self._source_image is None:
             return
 
-        mapper = self.volume.GetMapper()
-        if mapper is None:
+        if self._clip_mask_image is None or self._masker is None:
+            self._init_mask_pipeline()
+            if self._clip_mask_image is None or self._masker is None:
+                return
+
+        if not state.enabled:
+            self._reset_mask_to_zero()
+
+            if self._clip_mask_image is not None:
+                logger.debug(
+                    "[VolumeViewer] range after reset(default): %s (type=%s)",
+                    self._clip_mask_image.GetScalarRange(),
+                    self._clip_mask_image.GetScalarTypeAsString(),
+                )
+            self._masker.SetInputData(self._source_image)
+            self._masker.SetMaskInputData(self._clip_mask_image)
+            self._masker.Modified()
+            self.update_view()
             return
 
-        try:
-            if not state.enabled:
-                mapper.SetInputData(self._source_image)
-                mapper.Modified()
-                self.update_view()
-                return
+        self._decompress_into_current_mask(state.mask_zlib)
 
-            cached = self._get_cached_clipping_result(state)
-            if cached is not None:
-                mapper.SetInputData(cached)
-                mapper.Modified()
-                self.update_view()
-                return
+        if self._clip_mask_image is not None:
+            logger.debug(
+                "[VolumeViewer] mask range after decompress: %s (type=%s)",
+                self._clip_mask_image.GetScalarRange(),
+                self._clip_mask_image.GetScalarTypeAsString(),
+            )
 
-            # cache miss -> build result once, then cache it
-            result = self._build_clipped_image_from_state(state)
-            if result is None:
-                mapper.SetInputData(self._source_image)
-                mapper.Modified()
-                self.update_view()
-                return
+        self._masker.SetInputData(self._source_image)
+        self._masker.SetMaskInputData(self._clip_mask_image)
+        self._masker.Modified()
 
-            self._put_cached_clipping_result(state, result)
-            mapper.SetInputData(result)
-            mapper.Modified()
-            self.update_view()
+        if self._masker.GetOutput() is not None:
+            out = self._masker.GetOutput()
+            logger.debug(
+                "[VolumeViewer] masker output range after state apply: %s (type=%s)",
+                out.GetScalarRange(),
+                out.GetScalarTypeAsString(),
+            )
+        self.update_view()
 
-        except Exception:
-            logger.exception(
-                "[VolumeViewer] Rendering pipeline failed; falling back to original image.")
-            mapper.SetInputData(self._source_image)
-            self._drop_clipping_pipeline_refs()
-            self.update_view()
+    def _reset_mask_to_zero(self) -> None:
+        if self._source_image is None or self._clip_mask_image is None:
+            return
+        ones = vtk.vtkImageThreshold()
+        ones.SetInputData(self._source_image)
+        ones.ReplaceInOn()
+        ones.ReplaceOutOn()
+        ones.ThresholdBetween(-1e38, 1e38)
+        ones.SetInValue(255)
+        ones.SetOutValue(255)
+        ones.SetOutputScalarTypeToUnsignedChar()
+        ones.Update()
+
+        self._clip_mask_image.ShallowCopy(ones.GetOutput())
+        self._clip_mask_image.Modified()
+
+    def _compress_current_mask(self) -> bytes | None:
+        if self._clip_mask_image is None:
+            return None
+        arr = vtk_to_numpy(self._clip_mask_image.GetPointData().GetScalars()).view(np.uint8)
+        return zlib.compress(arr.tobytes(), level=3)
+
+    def _decompress_into_current_mask(self, mask_zlib: bytes | None) -> None:
+        if self._clip_mask_image is None or self._source_image is None:
+            return
+        if mask_zlib is None:
+            self._reset_mask_to_zero()
+            return
+
+        raw = zlib.decompress(mask_zlib)
+        expected = self._source_image.GetNumberOfPoints()
+        arr = np.frombuffer(raw, dtype=np.uint8, count=expected)
+
+        vtk_arr = numpy_to_vtk(arr, deep=True, array_type=vtk.VTK_UNSIGNED_CHAR)
+        self._clip_mask_image.GetPointData().SetScalars(vtk_arr)
+        self._clip_mask_image.Modified()
+
+    def _build_keep_mask_from_polygon_ndc(
+            self,
+            polygon_ndc: tuple[tuple[float, float], ...],
+            mode: ClipMode,
+    ) -> vtk.vtkImageData | None:
+        """
+        Build a mask image where 255 means 'hide' and 0 means 'show'.
+        REMOVE_INSIDE: hide inside polygon
+        REMOVE_OUTSIDE: hide outside polygon
+        """
+        if self._source_image is None:
+            return None
+
+        disp_pts = self._ndc_points_to_display(polygon_ndc)
+        world_pts = self._project_display_to_center_plane(disp_pts)
+        if len(world_pts) < 3:
+            return None
+
+        camera = self.renderer.GetActiveCamera()
+        fp = camera.GetFocalPoint()
+        view_vec = geometry_utils.direction_vector(camera.GetPosition(), fp)
+        norm = geometry_utils.calculate_norm(view_vec)
+        view_dir = [v / norm for v in view_vec]
+
+        vtk_points = vtk.vtkPoints()
+        for p in world_pts:
+            vtk_points.InsertNextPoint(*p)
+
+        loop = vtk.vtkImplicitSelectionLoop()
+        loop.SetLoop(vtk_points)
+        loop.SetNormal(*view_dir)
+        loop.AutomaticNormalGenerationOff()
+
+        stenciler = vtk.vtkImplicitFunctionToImageStencil()
+        stenciler.SetInput(loop)
+        stenciler.SetOutputOrigin(self._source_image.GetOrigin())
+        stenciler.SetOutputSpacing(self._source_image.GetSpacing())
+        stenciler.SetOutputWholeExtent(self._source_image.GetExtent())
+
+        ones = vtk.vtkImageThreshold()
+        ones.SetInputData(self._source_image)
+        ones.ReplaceInOn()
+        ones.ReplaceOutOn()
+        ones.ThresholdBetween(-1e38, 1e38)
+        ones.SetInValue(255)
+        ones.SetOutValue(255)
+        ones.SetOutputScalarTypeToUnsignedChar()
+        ones.Update()
+
+        img_stencil = vtk.vtkImageStencil()
+        img_stencil.SetInputData(ones.GetOutput())
+        img_stencil.SetStencilConnection(stenciler.GetOutputPort())
+        img_stencil.ReverseStencilOff()
+        img_stencil.SetBackgroundValue(0)
+
+        # Keep method
+        # ReverseStencilOff -> Keep INSIDE (inside=255, outside=0)
+        # ReverseStencilOn  -> Keep OUTSIDE (inside=0, outside=255)
+        if mode is ClipMode.REMOVE_INSIDE:
+            img_stencil.ReverseStencilOn()
+        else:
+            img_stencil.ReverseStencilOff()
+
+        img_stencil.Update()
+
+        keep_mask = vtk.vtkImageData()
+        keep_mask.ShallowCopy(img_stencil.GetOutput())
+        return keep_mask
+
+    def _accumulate_mask_and(self, region_hide_mask: vtk.vtkImageData) -> None:
+        """current_mask = max(current_mask, region_hide_mask)"""
+        if self._clip_mask_image is None:
+            return
+
+        op = vtk.vtkImageMathematics()
+        op.SetInput1Data(self._clip_mask_image)
+        op.SetInput2Data(region_hide_mask)
+        op.SetOperationToMin()
+        op.Update()
+
+        self._clip_mask_image.ShallowCopy(op.GetOutput())
+        self._clip_mask_image.Modified()
 
     def _get_cached_clipping_result(self, state: ClippingState) -> vtk.vtkImageData | None:
         hit = self._clipping_result_cache.get(state)
