@@ -8,8 +8,8 @@ from PySide6.QtWidgets import QMainWindow
 from PySide6.QtGui import QKeySequence, QAction
 from PySide6.QtCore import QSettings
 
-from ui.dialogs.error_notifier import ErrorNotifier
-from app.app_settings_manager import AppSettingsManager, RunMode
+from qv.ui.dialogs.error_notifier import ErrorNotifier
+from qv.app.app_settings_manager import AppSettingsManager, RunMode
 
 
 logger = logging.getLogger(__name__)

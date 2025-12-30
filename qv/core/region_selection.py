@@ -6,7 +6,7 @@ import vtk
 
 import logging
 import qv.utils.vtk_helpers as vtk_helpers
-from core import geometry_utils
+from qv.core import geometry_utils
 
 logger = logging.getLogger(__name__)
 

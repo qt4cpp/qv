@@ -13,14 +13,14 @@ from fontTools.colorLib import geometry
 from vtkmodules.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 
 import qv.utils.vtk_helpers as vtk_helpers
-from app.app_settings_manager import AppSettingsManager
-from core import geometry_utils
-from core.window_settings import WindowSettings
+from qv.app.app_settings_manager import AppSettingsManager
+from qv.core import geometry_utils
+from qv.core.window_settings import WindowSettings
 from qv.utils.log_util import log_io
-from operations.clipping.clipping_operation import ClippingOperation, CLIPPED_SCALAR, ClipMode
-from viewers.interactor_styles.clipping_interactor_style import ClippingInteractorStyle
-from viewers.base_viewer import BaseViewer
-from viewers.interactor_styles.volume_interactor_style import VolumeViewerInteractorStyle
+from qv.operations.clipping.clipping_operation import ClippingOperation, CLIPPED_SCALAR, ClipMode
+from qv.viewers.interactor_styles.clipping_interactor_style import ClippingInteractorStyle
+from qv.viewers.base_viewer import BaseViewer
+from qv.viewers.interactor_styles.volume_interactor_style import VolumeViewerInteractorStyle
 
 from vtkmodules.vtkCommonDataModel import vtkImplicitSelectionLoop
 

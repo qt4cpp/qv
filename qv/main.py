@@ -12,10 +12,10 @@ import sys
 
 from PySide6 import QtWidgets
 
-from ui.mainwindow import MainWindow
-from app.app_settings_manager import AppSettingsManager
-from app.logging_setup import apply_logging_policy, LogSystem, install_qt_message_handler
-from ui.dialogs.error_notifier import ErrorNotifier
+from qv.ui.mainwindow import MainWindow
+from qv.app.app_settings_manager import AppSettingsManager
+from qv.app.logging_setup import apply_logging_policy, LogSystem
+from qv.ui.dialogs.error_notifier import ErrorNotifier
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ def main():
 
     main_window = MainWindow(settings_mgr)
 
-    # Qt 終了次にログを確実に止める
+    # Qt 終了時にログを確実に止める
     app.aboutToQuit.connect(logs.stop)
     try:
         rc = app.exec()

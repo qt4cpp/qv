@@ -10,10 +10,10 @@ from matplotlib.backends import backend_registry
 from vtkmodules.vtkCommonDataModel import vtkImplicitSelectionLoop
 from vtkmodules.vtkRenderingCore import vtkActor
 
-from core import geometry_utils
-from core.region_selection import RegionSelectionController
-from log_util import log_io
-from operations.base_operation import BaseOperation
+from qv.core import geometry_utils
+from qv.core.region_selection import RegionSelectionController
+from qv.utils.log_util import log_io
+from qv.operations.base_operation import BaseOperation
 
 CLIPPED_SCALAR = -16383  # value guaranteed to sit outside clinical HUs
 

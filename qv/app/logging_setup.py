@@ -12,7 +12,7 @@ from pathlib import Path
 
 import faulthandler
 
-from app.app_settings_manager import AppSettingsManager, RunMode
+from qv.app.app_settings_manager import AppSettingsManager, RunMode
 
 
 @dataclass(frozen=True)
