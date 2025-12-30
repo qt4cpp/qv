@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QSplitter,
                                QHBoxLayout, QLabel, QPushButton)
 
 from app.app_settings_manager import AppSettingsManager
+from resource_paths import settings_dir
 from viewers.camera.camera_state import CameraAngle
 from core.window_settings import WindowSettings
 from log_util import log_io
@@ -34,7 +35,7 @@ class MainWindow(QMainWindow):
         self.setting = settings_mgr or AppSettingsManager()
 
         # Setup shortcuts
-        config_path = Path(__file__).parent.parent.parent / "settings"
+        config_path = settings_dir()
         self.shortcut_mgr = ShortcutManager(
             parent=self,
             config_path=config_path,
