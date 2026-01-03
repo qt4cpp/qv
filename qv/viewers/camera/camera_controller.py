@@ -5,8 +5,8 @@ from typing import Literal
 import vtk
 import logging
 
-from viewers.camera.camera_state import CameraAngle, CameraStateManager
-from core import geometry_utils
+from qv.viewers.camera.camera_state import CameraAngle, CameraStateManager
+from qv.core import geometry_utils
 
 from qv.utils import vtk_helpers
 

@@ -7,7 +7,7 @@ from PySide6 import QtWidgets
 from matplotlib import pyplot as plt
 from vtkmodules.util.numpy_support import vtk_to_numpy
 
-from core import geometry_utils
+from qv.core import geometry_utils
 
 
 def load_dicom_series(directory: str) -> vtk.vtkImageData:

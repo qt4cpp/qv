@@ -1,23 +1,27 @@
+# NOTE:
+# Startup diagnostics (logging / Qt plugin checks) must be executed
+#  before creating QApplication instance.
+
+from qv.app.logging_setup import setup_startup_logging, install_qt_message_handler
+
+setup_startup_logging(app_name="qv")
+install_qt_message_handler()
+
 import logging
 import sys
 
 from PySide6 import QtWidgets
 
-from ui.mainwindow import MainWindow
-from app.app_settings_manager import AppSettingsManager
-from app.logging_setup import apply_logging_policy, LogSystem
-from ui.dialogs.error_notifier import ErrorNotifier
+from qv.ui.mainwindow import MainWindow
+from qv.app.app_settings_manager import AppSettingsManager
+from qv.app.logging_setup import apply_logging_policy, LogSystem
+from qv.ui.dialogs.error_notifier import ErrorNotifier
 
 logger = logging.getLogger(__name__)
 
 
 def main():
     logs = LogSystem("qv")
-
-    # 未処理例外はログを残す
-    def excepthook(exctype, value, tb):
-        logging.getLogger("qv").exception("Uncaught exception", exc_info=(exctype, value, tb))
-    sys.excepthook = excepthook
 
     # 既存の QApplication インスタンスを取得。なければ新規作成。
     app = QtWidgets.QApplication.instance()
@@ -34,7 +38,7 @@ def main():
 
     main_window = MainWindow(settings_mgr)
 
-    # Qt 終了次にログを確実に止める
+    # Qt 終了時にログを確実に止める
     app.aboutToQuit.connect(logs.stop)
     try:
         rc = app.exec()

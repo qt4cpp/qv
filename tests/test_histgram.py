@@ -4,7 +4,7 @@ import pytest
 from PySide6.QtWidgets import QWidget
 import pyqtgraph as pg
 
-from ui.widgets.histgram_widget import show_histgram_window
+from qv.ui.widgets.histgram_widget import show_histgram_window
 
 
 @pytest.fixture(autouse=True)

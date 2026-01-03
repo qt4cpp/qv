@@ -5,7 +5,7 @@ import pyqtgraph as pg
 from PySide6.QtWidgets import QWidget, QVBoxLayout
 from pyqtgraph import ViewBox
 
-from log_util import log_io
+from qv.utils.log_util import log_io
 
 logger = logging.getLogger(__name__)
 

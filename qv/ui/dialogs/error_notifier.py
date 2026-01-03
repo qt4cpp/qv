@@ -4,7 +4,7 @@ from typing import Optional
 from PySide6.QtWidgets import QApplication, QMessageBox, QErrorMessage
 from PySide6.QtCore import QObject, QTimer, Qt
 
-from app.app_settings_manager import AppSettingsManager
+from qv.app.app_settings_manager import AppSettingsManager
 
 
 logger = logging.getLogger(__name__)

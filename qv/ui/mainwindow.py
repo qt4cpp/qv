@@ -6,14 +6,15 @@ from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QSplitter,
                                QHBoxLayout, QLabel, QPushButton)
 
-from app.app_settings_manager import AppSettingsManager
-from viewers.camera.camera_state import CameraAngle
-from core.window_settings import WindowSettings
-from log_util import log_io
-from app.status import STATUS_FIELDS, StatusField
-from app.shortcut_manager import ShortcutManager
-from viewers.volume_viewer import VolumeViewer
-from ui.widgets.histgram_widget import HistogramWidget
+from qv.app.app_settings_manager import AppSettingsManager
+from qv.utils.resource_paths import settings_dir
+from qv.viewers.camera.camera_state import CameraAngle
+from qv.core.window_settings import WindowSettings
+from qv.utils.log_util import log_io
+from qv.app.status import STATUS_FIELDS, StatusField
+from qv.app.shortcut_manager import ShortcutManager
+from qv.viewers.volume_viewer import VolumeViewer
+from qv.ui.widgets.histgram_widget import HistogramWidget
 import qv.utils.vtk_helpers as vtk_helpers
 import copy
 
@@ -34,7 +35,7 @@ class MainWindow(QMainWindow):
         self.setting = settings_mgr or AppSettingsManager()
 
         # Setup shortcuts
-        config_path = Path(__file__).parent.parent.parent / "settings"
+        config_path = settings_dir()
         self.shortcut_mgr = ShortcutManager(
             parent=self,
             config_path=config_path,
