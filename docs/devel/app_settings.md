@@ -26,6 +26,66 @@
 
 ※ 現状、JSON ファイルのデフォルト読み込みは未実装です（今後拡張予定なら別途 docs 追記）。
 
+## 2.1 JSON デフォルトファイル仕様
+
+本プロジェクトでは、コード内 `DEFAULTS` を最終フォールバックとしつつ、
+**JSON ファイルによるデフォルト定義** を優先的に読み込む。
+
+### settings/app.json
+
+- トップレベルオブジェクト(dict)
+- 想定するギーは `general` と `view`
+- 部分的に指定可能（指定されていないキーは `base_defaults` にフォールバック）
+
+example:
+```json
+{
+  "general": {
+    "run_mode": "development",
+    "logging_level": "INFO"
+  },
+  "view": {
+    "rotation_step_deg": 5.0
+  }
+}
+```
+
+### settings/viewer.json
+
+`viewer.json` は Viewer / View 系のデフォルトを用途別に分割して持つためのファイルです。
+本プロジェクトでは、 **2つの形式を許可**しています。
+
+#### フラット
+
+```json
+{
+  "rotation_step_deg": 2.0
+}
+```
+
+#### ネスト
+
+```json
+{
+  "view": {
+    "rotation_step_deg": 2.0
+  }
+}
+```
+
+どちらの形式でも、内部的には `{"view": {...}}` に正規化され、 `base_defaults` と deep-mergeされます。
+
+### 欠損･破損時の挙動
+
+- Production(strict ではない)
+  - 欠損･破損していても起動を継続し、ログに継続を出します（フォールバック） 
+- Development(strict)
+  - 欠損･破損は例外 (`SettingsError`) として扱い、早期に問題を顕在化させます。
+
+strict 判定条件:
+- 環境変数 `QV_STRICT_SETTINGS=1` が指定されている場合
+- それ以外では `QSettings` の `general/run_mode` が `development` / `verbose`の場合
+
 ---
 
 ## 3. データモデル
@@ -55,7 +115,7 @@
 ```py
 DEFAULTS = {
   "general": {"run_mode": "development", "logging_level": "INFO"},
-  "view": {"rotation_step_deg": 1.0},
+  "view": {"rotation_step_deg": 5.0},
 }
 ```
 
@@ -94,19 +154,16 @@ DEFAULTS = {
 ### 6.2 logging_level
 
 - 文字列を大文字化して `DEBUG/INFO/WARNING/ERROR` のみ許可
-- 不正値は `"INFO"` にフォールバック（現状実装）
+- 不正値は `base_defaults["general"]["logging_level"]` にフォールバック
 
 関数: `_validate_logging_level(v)`
 
 ### 6.3 rotation_step_deg
 
-- `float` 変換できない → `5.0` にフォールバック（現状実装）
-- 範囲外（`<= 0` または `> 90`） → `5.0` にフォールバック（現状実装）
+- `float` 変換できない場合は`base_defaults["view"]["rotation_step_deg"]` にフォールバック
+- 範囲外（`<= 0` または `> 90`）の場合も同様
 
 関数: `_validate_rotation_step(v)`
-
-> NOTE: `DEFAULTS["view"]["rotation_step_deg"]` が `1.0` なのに対し、検証失敗時は `5.0` に固定フォールバックしています。  
-> 「常に DEFAULTS に戻す」方針にしたい場合は、ここを `DEFAULTS` 参照へ統一するのが望ましいです。
 
 ---
 

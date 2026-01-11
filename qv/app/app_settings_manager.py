@@ -1,9 +1,16 @@
 from __future__ import annotations
 from dataclasses import dataclass, asdict, field
 from enum import Enum
-from typing import Any, Dict
+from typing import Any, Dict, Mapping, Optional
 from PySide6.QtCore import QSettings
 import logging
+import json
+from pathlib import Path
+
+from qv.utils.json_loader import deep_merge as _deep_merge
+from qv.utils.json_loader import truthy_env as _truthy_env
+from qv.utils.json_loader import read_json_dict as _read_json_dict
+
 
 logger = logging.getLogger(__name__)
 
@@ -22,15 +29,18 @@ class RunMode(str, Enum):
 # ----------------------
 # デフォルト設定
 # ----------------------
-DEFAULTS: Dict[str, Any] = {
+base_defaults: Dict[str, Any] = {
     "general": {
         "run_mode": RunMode.DEVELOPMENT.value,
         "logging_level": "INFO",  # "DEBUG", "INFO", "WARNING", "ERROR"
     },
     "view": {
-        "rotation_step_deg": 1.0,
+        "rotation_step_deg": 5.0,
     },
 }
+
+class SettingsError(RuntimeError):
+    """Raised when strict settings loading fails (dev/CI)."""
 
 # ---------------------
 # Data model
@@ -63,18 +73,30 @@ def _validate_run_mode(v: Any) -> RunMode:
     try:
         return RunMode(mode)
     except ValueError:
-        return RunMode(DEFAULTS["general"]["run_mode"])
+        return RunMode(base_defaults["general"]["run_mode"])
 
 def _validate_logging_level(v: str) -> str:
-    v = str(v).upper()
-    return v if v in ("DEBUG", "INFO", "WARNING", "ERROR") else "INFO"
+    """Validate and normalize logging level
+
+    Returns one of DEBUG/INFO/WARNING/ERROR.
+    Falls back to base_defaults['general']['logging_level'] if invalid.
+    """
+    fallback = str(base_defaults["general"]["logging_level"]).upper()
+    level = str(v).upper()
+    return level if level in ("DEBUG", "INFO", "WARNING", "ERROR") else fallback
 
 def _validate_rotation_step(v: Any) -> float:
+    """Validate and normalize rotation step in degree.
+
+    Always returns a safe float value. Falls back to
+     base_defaults['view']['rotation_step_deg'] if invalid.
+    """
+    fallback = float(base_defaults["view"]["rotation_step_deg"])
     try:
         f = float(v)
     except Exception:
-        return 5.0
-    return f if (0 < f <= 90) else 5.0
+        return fallback
+    return f if (0 < f <= 90) else fallback
 
 
 # ---------------------
@@ -87,8 +109,18 @@ class AppSettingsManager:
     読み込み時はに検証し、範囲外の値はフォールバック
     set_* は設定すると QSettings に即時保存される。
     """
-    def __init__(self, org_domain: str = "TedApp.org", app_name: str = "QV"):
+    def __init__(self,
+                 org_domain: str = "TedApp.org",
+                 app_name: str = "QV",
+                 settings_dir: Path | None = None,):
+        """
+        :param org_domain: setting for QSettings.
+        :param app_name:  setting for QSettings.
+        :param settings_dir:  Base dir for packaged defaults JSON)
+        """
         self._settings = QSettings(org_domain, app_name)
+        self._settings_dir = settings_dir
+        self._warnings: list[str] = []  # Non-fatal settings load problems
         self._data = self._load_effective()
 
     # 読み取り
@@ -112,6 +144,15 @@ class AppSettingsManager:
     @property
     def rotation_step_deg(self) -> float:
         return self._data.view.rotation_step_deg
+
+    @property
+    def warnings(self) -> tuple[str, ...]:
+        """Non-fatal settings load problems (production fallback path)."""
+        return tuple(self._warnings)
+
+    @property
+    def had_fallback(self) -> bool:
+        return bool(self._warnings)
 
     # 書き込み
     def set_run_mode(self, v: str | RunMode) -> None:
@@ -155,11 +196,76 @@ class AppSettingsManager:
         data["general"]["run_mode"] = self._data.general.run_mode.value
         return data
 
+    def dump_effective_settings(self) -> str:
+        """Return effective settings JSON (for diagnostics/support)."""
+        try:
+            return json.dumps(self.to_dict(), ensure_ascii=False, indent=2)
+        except Exception:
+            logger.exception("Failed to dump effective settings.")
+            return "{}"
+
     # ---------- 内部実装 ---------------
     def _load_effective(self) -> AppSettingsData:
-        """DEFAULTS をベースに QSettings の上書きを反映、検証、モデル化"""
-        merged = self._apply_qsettings_overrides(DEFAULTS)
-        return self._make_model_from(merged)
+        """DEFAULTS (JSON preferred) + QSettings overrides, validate, and modelize."""
+        self._warnings.clear()
+        base = self._load_defaults_files()  # may fall back to DEFAULTS
+        merged = self._apply_qsettings_overrides(base)
+        return self._make_model_from(merged, base_defaults=base)
+
+    def _is_strict(self) -> bool:
+        """Strict mode for dev/CI: missing/broken defaults become fatal."""
+        if _truthy_env("QV_STRICT_SETTINGS"):
+            return True
+        # If user already set run_mode in QSettings, use it to decide strictness.
+        v = self._settings.value("general/run_mode", None)
+        if v is None:
+            return False
+        try:
+            mode = _validate_run_mode(v)
+        except Exception:
+            return False
+        return mode in (RunMode.DEVELOPMENT, RunMode.VERBOSE)
+
+    def _load_defaults_files(self) -> dict[str, Any]:
+        """
+        Load defaults from JSON files under settings_dir.
+        
+        Files (any can be missing):
+        - app.json
+        - viewer.json
+        
+        If settings_dir is None, use in-code DEFAULTS.
+        """
+        if self._settings_dir is None:
+            return dict(base_defaults)
+
+        strict = self._is_strict()
+        quarantine = not strict  # production path only
+
+        merged: dict[str, Any] = dict(base_defaults)
+
+        app_json = _read_json_dict(
+            self._settings_dir / "app.json",
+            strict=strict,
+            quarantine_broken=quarantine,
+            warnings=self._warnings,
+        )
+        if app_json:
+            merged = _deep_merge(merged, app_json)
+
+        viewer_json = _read_json_dict(
+            self._settings_dir / "viewer.json",
+            strict=strict,
+            quarantine_broken=quarantine,
+            warnings=self._warnings,
+        )
+        if viewer_json:
+            # allow either {"view": {...}} or flat
+            if "view" in viewer_json and isinstance(viewer_json.get("view"), dict):
+                merged = _deep_merge(merged, viewer_json)
+            else:
+                merged = _deep_merge(merged, {"view": viewer_json})
+        return merged
 
     def _apply_qsettings_overrides(self, base: dict[str, Any]) -> dict[str, Any]:
         """
@@ -190,7 +296,9 @@ class AppSettingsManager:
 
         return {"general": g, "view": vw}
 
-    def _make_model_from(self, merged: dict[str, Any]) -> AppSettingsData:
+    def _make_model_from(self,
+                         merged: dict[str, Any],
+                         base_defaults: dict[str, Any]) -> AppSettingsData:
         """
         making model from merged dict and returning merged AppSettingsData
         :param merged:
@@ -200,10 +308,13 @@ class AppSettingsManager:
         vw = merged.get("view", {})
         return AppSettingsData(
             general=GeneralConfig(
-                run_mode=_validate_run_mode(g.get("run_mode", DEFAULTS["general"]["run_mode"])),
-                logging_level=_validate_logging_level(g.get("logging_level", DEFAULTS["general"]["logging_level"])),
+                run_mode=_validate_run_mode(g.get("run_mode",
+                                                  base_defaults["general"]["run_mode"])),
+                logging_level=_validate_logging_level(g.get("logging_level",
+                                                            base_defaults["general"]["logging_level"])),
             ),
             view=ViewConfig(
-                rotation_step_deg=_validate_rotation_step(vw.get("rotation_step_deg", DEFAULTS["view"]["rotation_step_deg"]))
+                rotation_step_deg=_validate_rotation_step(vw.get("rotation_step_deg",
+                                                                 base_defaults["view"]["rotation_step_deg"]))
             ),
         )
