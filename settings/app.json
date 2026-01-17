@@ -1,0 +1,10 @@
+{
+  "general": {
+    "run_mode": "production",
+    "logging_level": "INFO"
+  },
+  "windows": {
+    "width": "800",
+    "height": "600"
+  }
+}

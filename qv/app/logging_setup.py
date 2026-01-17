@@ -234,25 +234,55 @@ class LogSystem:
             self._console_handler.setLevel(console_level)
         if self._file_handler is not None and file_level is not None:
             self._file_handler.setLevel(file_level)
+        logging.debug("Log levels updated: root=%s, console=%s, file=%s", root_level, console_level, file_level)
 
     def stop(self):
         self.listener.stop()
 
 
 def apply_logging_policy(logs: LogSystem, settings: AppSettingsManager) -> None:
-    """環境に応じて、ログの出力レベルを切り替える"""
-    mode = getattr(settings, "run_mode", None)
-    if mode is None:
-        mode = RunMode.DEVELOPMENT if getattr(settings, "dev_mode", False) else RunMode.PRODUCTION
+    """run_mode を主としてログレベルを決定する。必要に応じて環境変数で一時上書きが可能にする。
 
-    if mode == RunMode.DEVELOPMENT or mode == RunMode.VERBOSE:
+    優先度:
+      1) 環境変数(運用･サポート用)
+      2) run_mode (通常運用)
+
+    環境変数:
+      - QV_LOG_LEVEL: root/ console を一括指定
+      - QV_LOG_CONSOLE_LEVEL: console のみ指定
+      - QV_LOG_FILE_LEVEL: file のみ指定
+    """
+    mode = settings.run_mode
+    logging.debug("Logging policy: run_mode=%s", mode)
+
+    # --- base policy by run_mode ---
+    if mode in (RunMode.DEVELOPMENT, RunMode.VERBOSE):
         root = logging.DEBUG
         console = logging.DEBUG
         file = logging.DEBUG
     else:
-        root = logging.DEBUG
+        root = logging.INFO
         console = logging.INFO
         file = logging.DEBUG
+
+    def _env_level(name: str) -> int | None:
+        v = os.getenv(name)
+        if not v:
+            return None
+        return getattr(logging, v.upper(), None)
+
+    env_root = _env_level("QV_LOG_LEVEL")
+    if env_root is not None:
+        root = env_root
+        console = env_root
+
+    env_console = _env_level("QV_LOG_CONSOLE_LEVEL")
+    if env_console is not None:
+        console = env_console
+
+    env_file = _env_level("QV_LOG_FILE_LEVEL")
+    if env_file is not None:
+        file = env_file
 
     logs.apply_levels(root_level=root, console_level=console, file_level=file)
 
