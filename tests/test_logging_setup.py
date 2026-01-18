@@ -55,11 +55,9 @@ def _read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
-def test_info_level_writes_file(module, tmp_log_dir, monkeypatch):
+def test_info_level_writes_file(module, tmp_log_dir):
     """test at INFO level"""
-    monkeypatch.setenv("QV_LOG_LEVEL", "INFO") # INFOレベルを明示
-
-    logs = module.LogSystem("qv")
+    logs = module.LogSystem.from_levels("qv", root_level=logging.INFO, console_level=logging.INFO)
     logger = logging.getLogger("qv.test")
 
     logger.debug("debug should NOT appear")
@@ -79,11 +77,9 @@ def test_info_level_writes_file(module, tmp_log_dir, monkeypatch):
     assert "qv.test" in text
 
 
-def test_debug_level_outputs_debug(module, tmp_log_dir, monkeypatch):
+def test_debug_level_outputs_debug(module, tmp_log_dir):
     """test at DEBUG level"""
-    monkeypatch.setenv("QV_LOG_LEVEL", "DEBUG")
-
-    logs = module.LogSystem("qv")
+    logs = module.LogSystem.from_levels("qv", root_level=logging.DEBUG, console_level=logging.DEBUG)
     logger = logging.getLogger("qv.clipping")
 
     logger.debug("debug visible")
@@ -95,10 +91,8 @@ def test_debug_level_outputs_debug(module, tmp_log_dir, monkeypatch):
     assert "info visible" in text
 
 
-def test_queue_listener_flush_on_stop(module, tmp_log_dir, monkeypatch):
-    monkeypatch.setenv("QV_LOG_LEVEL", "INFO")
-
-    logs = module.LogSystem("qv")
+def test_queue_listener_flush_on_stop(module, tmp_log_dir):
+    logs = module.LogSystem.from_levels("qv", root_level=logging.INFO, console_level=logging.INFO)
     logger = logging.getLogger("qv.bulk")
 
     for i in range(200):
@@ -126,20 +120,19 @@ def text_rotation_by_small_max_bytes(module, tmp_log_dir, monkeypatch):
     :param monkeypatch:
     :return: NOne
     """
-    monkeypatch.setenv("QV_LOG_LEVEL", "INFO")
     monkeypatch.setenv("QV_LOG_BACKUP_COUNT", "2")
 
     # build_config をらっぷして maxBytes を小さくsルウ
     orig_build = module.build_config
 
-    def tiny_build_config(app_name: str, level: str|None = None, log_dir: Path|None = None):
-        cfg = orig_build(app_name, level, log_dir)
+    def tiny_build_config(app_name: str, root_level: int, console_level: int, log_dir: Path | None = None):
+        cfg = orig_build(app_name, root_level, console_level, log_dir)
         cfg["_file_settings"]["maxBytes"] = 100  # 小容量に設定
         return cfg
 
     monkeypatch.setattr(module, "build_config", tiny_build_config)
 
-    logs = module.LogSystem("qv")
+    logs = module.LogSystem.from_levels("qv", root_level=logging.INFO, console_level=logging.INFO)
     logger = logging.getLogger("qv.rotate")
 
     payload = "X" * 180
