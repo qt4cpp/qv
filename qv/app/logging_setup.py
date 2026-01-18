@@ -23,6 +23,11 @@ class LogPaths:
     log_dir: Path
 
 
+LOG_FORMAT = "%(asctime)s.%(msecs)03d [%(levelname)s] %(process)d %(threadName)s %(name)s %(message)s"
+LOG_DATEFMT = "%Y-%m-%dT%H:%M:%S%z"
+STARTUP_LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+
+
 def _project_root_from_package() -> Path:
     """
     In development, this function returns the path to the project root directory.
@@ -80,7 +85,7 @@ def setup_startup_logging(
         backup_count: int = 5,
     ) -> LogPaths:
     """
-    Startup logging setup.
+    Logging setup while startup.
     - Rotating file handler
     - uncaught exception logging
     - faulthandler (crash logging)
@@ -96,7 +101,7 @@ def setup_startup_logging(
     if root.handlers:
         root.handlers.clear()
 
-    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    fmt = logging.Formatter(STARTUP_LOG_FORMAT)
 
     # File (rotating)
     fh = RotatingFileHandler(
@@ -225,8 +230,8 @@ def build_config(
     log_dir = log_dir or default_log_dir(app_name)
     log_file = str(log_dir / f"{app_name}.log")
 
-    fmt = "%(asctime)s.%(msecs)03dZ %(levelname)s %(process)d %(threadName)s %(name)s %(message)s"
-    datefmt = "%Y-%m-%dT%H:%M:%S"
+    fmt = LOG_FORMAT
+    datefmt = LOG_DATEFMT
 
     # Convert int level to string for dictConfig
     root_level_name = logging.getLevelName(root_level)
