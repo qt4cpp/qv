@@ -119,6 +119,8 @@ class AppSettingsManager:
         :param settings_dir:  Base dir for packaged defaults JSON)
         """
         self._settings = QSettings(org_domain, app_name)
+        if settings_dir is None:
+            settings_dir = Path(__file__).resolve().parents[2] / "settings"
         self._settings_dir = settings_dir
         self._warnings: list[str] = []  # Non-fatal settings load problems
         self._data = self._load_effective()
