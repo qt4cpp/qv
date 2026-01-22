@@ -1,0 +1,9 @@
+{
+  "general": {
+    "run_mode": "production"
+  },
+  "windows": {
+    "width": "800",
+    "height": "600"
+  }
+}

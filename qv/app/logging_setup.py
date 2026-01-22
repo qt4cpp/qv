@@ -10,6 +10,7 @@ import warnings
 from dataclasses import dataclass
 from logging.handlers import QueueHandler, QueueListener, RotatingFileHandler
 from pathlib import Path
+from dataclasses import dataclass, asdict
 
 import faulthandler
 
@@ -21,6 +22,15 @@ class LogPaths:
     log_file: Path
     crash_file: Path
     log_dir: Path
+
+@dataclass(frozen=True)
+class FileLogSettings:
+    filename: str
+    maxBytes: int
+    backupCount: int
+    encoding: str
+    format: str
+    datefmt: str
 
 
 LOG_FORMAT = "%(asctime)s.%(msecs)03d [%(levelname)s] %(process)d %(threadName)s %(name)s %(message)s"
@@ -99,7 +109,12 @@ def setup_startup_logging(
 
     # Prevent duplicate registration of handlers.
     if root.handlers:
-        root.handlers.clear()
+        for h in list(root.handlers):
+            root.removeHandler(h)
+            try:
+                h.close()
+            except Exception:
+                pass
 
     fmt = logging.Formatter(STARTUP_LOG_FORMAT)
 
@@ -128,7 +143,7 @@ def setup_startup_logging(
         # Prevent GC keeping reference to the file object.
         root._qv_crash_fh = f
     except Exception:
-        pass
+        logging.getLogger(__name__).exception("Failed to enable faulthandler.")
 
     # logging uncaught exception
     def _excepthook(exc_type, exc, tb):
@@ -237,6 +252,15 @@ def build_config(
     root_level_name = logging.getLevelName(root_level)
     console_level_name = logging.getLevelName(console_level)
 
+    file_settings = FileLogSettings(
+        filename=log_file,
+        maxBytes=1024 * 1024 * 5,
+        backupCount=int(os.getenv("QV_LOG_BACKUP_COUNT", 5)),
+        encoding="utf-8",
+        format=fmt,
+        datefmt=datefmt,
+    )
+
     return {
         "version": 1,
         "disable_existing_loggers": False,
@@ -255,14 +279,7 @@ def build_config(
         },
         "root": {"level": root_level_name, "handlers": ["queue", "console"]},
         # キュー先でファイルに書き込む
-        "_file_settings": {
-            "filename": log_file,
-            "maxBytes": 1024 * 1024 * 5,
-            "backupCount": int(os.getenv("QV_LOG_BACKUP_COUNT", 5)),
-            "encoding": "utf-8",
-            "format": fmt,
-            "datefmt": datefmt
-        },
+        "_file_settings": asdict(file_settings),
     }
 
 
