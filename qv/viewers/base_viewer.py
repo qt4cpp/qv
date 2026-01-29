@@ -8,9 +8,6 @@ from typing import TYPE_CHECKING
 import vtk
 from PySide6 import QtWidgets, QtCore
 
-from qv.app.app_settings_manager import AppSettingsManager
-from qv.viewers.camera.camera_state import CameraAngle
-from qv.viewers.camera.camera_controller import CameraController
 
 if TYPE_CHECKING:
     pass
@@ -18,10 +15,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class ABCQtMeta(ABCMeta, type(QtWidgets.QWidget)):
-    """
-    Metaclass that combines ABCMeta and type(QWidget)
-    """
+class ABCQtMeta(type(QtWidgets.QWidget), ABCMeta):
     pass
 
 
@@ -31,60 +25,32 @@ class BaseViewer(QtWidgets.QWidget, metaclass=ABCQtMeta):
 
     Provides common functionality:
     - VTK rendering setup (renderer, interactor)
-    - Camera control
-    - Status bar management
-    - Shortcut handling
-    - Basic camera operations
+    - Basic rendering helpers / lifecycle
 
     Subclasses should implement:
     - load_data(): Load and display specific data types
-    - register_commands(): Register commands for the viewer
     - setup_interactor_style(): Set up the interactor style
     """
 
     # Signals
-    cameraAngleChanged = QtCore.Signal(object)
     dataLoaded = QtCore.Signal()
 
     def __init__(
             self,
-            settings_manager: AppSettingsManager | None = None,
             parent: QtWidgets.QWidget | None = None,
-            *,
-            enable_camera_controller: bool = True,
-            auto_initialize_interactor: bool = True,
     ) -> None:
         """
         Initialize the base viewer.
-        :param settings_manager: Application settings manager
         :param parent: Parent widget
-        :param auto_initialize_interactor: if True, call interactor.Initialize() automatically.
-                                           If your derived class needs special init timing, set False.
         """
         super().__init__(parent)
-
-        self.setting = settings_manager or AppSettingsManager()
-        self._enable_camera_controller = enable_camera_controller
-        self._auto_initialize_interactor = auto_initialize_interactor
 
         self._setup_ui()
         self._setup_vtk_rendering()
 
-        # Optional camera controller (for 3D viewers)
-        self.camera_controller : CameraController | None = None
-        if self._enable_camera_controller:
-            self.camera_controller = CameraController(
-                self.renderer.GetActiveCamera(),
-                self.renderer
-            )
-        self.camera_controller.add_angle_changed_callback(self._on_camera_angle_changed)
-
         # Subclass hook
         self.setup_interactor_style()
-
-        # Single place to Initialize interactor (avoid double init in subclasses)
-        if self._auto_initialize_interactor:
-            self.interactor.Initialize()
+        self.interactor.Initialize()
 
     def _setup_ui(self) -> None:
         """Setup the UI."""
@@ -146,19 +112,6 @@ class BaseViewer(QtWidgets.QWidget, metaclass=ABCQtMeta):
         Should emit dataLoaded signal when data is loaded.
         """
         raise NotImplementedError
-
-    # =====================================================
-    # Camera Callbacks
-    # =====================================================
-
-    def _on_camera_angle_changed(self, angle: CameraAngle) -> None:
-        """
-        Callback for when the camera angle changes.
-
-        :param angle: New camera angle
-        :return:
-        """
-        self.cameraAngleChanged.emit(angle)
 
     # =====================================================
     # Rendering

@@ -19,7 +19,7 @@ from qv.core.window_settings import WindowSettings
 from qv.utils.log_util import log_io
 from qv.operations.clipping.clipping_operation import ClippingOperation, CLIPPED_SCALAR, ClipMode
 from qv.viewers.interactor_styles.clipping_interactor_style import ClippingInteractorStyle
-from qv.viewers.base_viewer import BaseViewer
+from qv.viewers.camera_viewer import Camera3DViewer
 from qv.viewers.interactor_styles.volume_interactor_style import VolumeViewerInteractorStyle
 
 from vtkmodules.vtkCommonDataModel import vtkImplicitSelectionLoop
@@ -31,7 +31,7 @@ from qv.core.states import ClippingState
 logger = logging.getLogger(__name__)
 
 
-class VolumeViewer(BaseViewer):
+class VolumeViewer(Camera3DViewer):
     """
     Volume viewer widget for 3d DICOM images.
 
