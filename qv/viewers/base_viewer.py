@@ -50,24 +50,41 @@ class BaseViewer(QtWidgets.QWidget, metaclass=ABCQtMeta):
             self,
             settings_manager: AppSettingsManager | None = None,
             parent: QtWidgets.QWidget | None = None,
+            *,
+            enable_camera_controller: bool = True,
+            auto_initialize_interactor: bool = True,
     ) -> None:
         """
         Initialize the base viewer.
         :param settings_manager: Application settings manager
         :param parent: Parent widget
+        :param auto_initialize_interactor: if True, call interactor.Initialize() automatically.
+                                           If your derived class needs special init timing, set False.
         """
         super().__init__(parent)
+
         self.setting = settings_manager or AppSettingsManager()
+        self._enable_camera_controller = enable_camera_controller
+        self._auto_initialize_interactor = auto_initialize_interactor
+
         self._setup_ui()
         self._setup_vtk_rendering()
 
-        self.camera_controller = CameraController(
-            self.renderer.GetActiveCamera(),
-            self.renderer)
+        # Optional camera controller (for 3D viewers)
+        self.camera_controller : CameraController | None = None
+        if self._enable_camera_controller:
+            self.camera_controller = CameraController(
+                self.renderer.GetActiveCamera(),
+                self.renderer
+            )
         self.camera_controller.add_angle_changed_callback(self._on_camera_angle_changed)
 
+        # Subclass hook
         self.setup_interactor_style()
-        self.interactor.Initialize()
+
+        # Single place to Initialize interactor (avoid double init in subclasses)
+        if self._auto_initialize_interactor:
+            self.interactor.Initialize()
 
     def _setup_ui(self) -> None:
         """Setup the UI."""
@@ -118,7 +135,7 @@ class BaseViewer(QtWidgets.QWidget, metaclass=ABCQtMeta):
         style = CustomInteractorStyle(self)
         self.interactor.SetInteractorStyle(style)
         """
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     def load_data(self, *args, **kwargs) -> None:
@@ -128,7 +145,7 @@ class BaseViewer(QtWidgets.QWidget, metaclass=ABCQtMeta):
         Subclasses should implement this method to load and display data.
         Should emit dataLoaded signal when data is loaded.
         """
-        pass
+        raise NotImplementedError
 
     # =====================================================
     # Camera Callbacks
