@@ -33,6 +33,7 @@ class Camera3DViewer(BaseViewer):
     def __init__(self,
                  settings_manager: AppSettingsManager | None = None,
                  parent=None) -> None:
+        """Initializes camera controller and settings manager"""
         super().__init__(parent=parent)
 
         self.setting = settings_manager or AppSettingsManager()
