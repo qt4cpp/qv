@@ -1,7 +1,6 @@
 {
   "general": {
-    "run_mode": "production",
-    "logging_level": "INFO"
+    "run_mode": "production"
   },
   "windows": {
     "width": "800",

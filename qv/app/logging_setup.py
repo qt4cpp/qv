@@ -6,9 +6,11 @@ import os
 import queue
 import sys
 import traceback
+import warnings
 from dataclasses import dataclass
 from logging.handlers import QueueHandler, QueueListener, RotatingFileHandler
 from pathlib import Path
+from dataclasses import dataclass, asdict
 
 import faulthandler
 
@@ -20,6 +22,20 @@ class LogPaths:
     log_file: Path
     crash_file: Path
     log_dir: Path
+
+@dataclass(frozen=True)
+class FileLogSettings:
+    filename: str
+    maxBytes: int
+    backupCount: int
+    encoding: str
+    format: str
+    datefmt: str
+
+
+LOG_FORMAT = "%(asctime)s.%(msecs)03d [%(levelname)s] %(process)d %(threadName)s %(name)s %(message)s"
+LOG_DATEFMT = "%Y-%m-%dT%H:%M:%S%z"
+STARTUP_LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 
 
 def _project_root_from_package() -> Path:
@@ -79,7 +95,7 @@ def setup_startup_logging(
         backup_count: int = 5,
     ) -> LogPaths:
     """
-    Startup logging setup.
+    Logging setup while startup.
     - Rotating file handler
     - uncaught exception logging
     - faulthandler (crash logging)
@@ -89,13 +105,18 @@ def setup_startup_logging(
     crash_file = log_dir / f"{app_name}.crash.log"
 
     root = logging.getLogger()
-    root.setLevel(logging.DEBUG)
+    root.setLevel(min(level_file, level_console))
 
     # Prevent duplicate registration of handlers.
     if root.handlers:
-        root.handlers.clear()
+        for h in list(root.handlers):
+            root.removeHandler(h)
+            try:
+                h.close()
+            except Exception:
+                pass
 
-    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    fmt = logging.Formatter(STARTUP_LOG_FORMAT)
 
     # File (rotating)
     fh = RotatingFileHandler(
@@ -122,7 +143,7 @@ def setup_startup_logging(
         # Prevent GC keeping reference to the file object.
         root._qv_crash_fh = f
     except Exception:
-        pass
+        logging.getLogger(__name__).exception("Failed to enable faulthandler.")
 
     # logging uncaught exception
     def _excepthook(exc_type, exc, tb):
@@ -154,14 +175,92 @@ def default_log_dir(app_name: str) -> Path:
     return base
 
 
-def build_config(app_name: str, level: str = None, log_dir: Path | None = None) -> dict:
-    """Build a logging config dict."""
-    level = level or os.getenv("QV_LOG_LEVEL", "INFO").upper()
+def _compute_levels_from_settings(settings: AppSettingsManager) -> tuple[int, int, int]:
+    """Compute (root, console, file) levels from run_mode with optional env overriedes.
+
+    Single source of truth for log level policy.
+
+    Env (non-persistent):
+      - QV_LOG_LEVEL : override root+console
+      - QV_LOG_CONSOLE_LEVEL : override console only
+      - QV_LOG_FILE_LEVEL : override file only
+
+    Returns:
+        (root_level, console_level, file_level) as logging.DEBUG/INFO/etc.
+    """
+    mode = settings.run_mode
+
+    if mode in (RunMode.DEVELOPMENT, RunMode.VERBOSE):
+        root = logging.DEBUG
+        console = logging.DEBUG
+        file = logging.DEBUG
+    else:  # PRODUCTION
+        root = logging.INFO
+        console = logging.INFO
+        file = logging.DEBUG
+
+    def _env_level(name: str) -> int | None:
+        v = os.getenv(name)
+        if not v:
+            return None
+        return getattr(logging, v.upper(), None)
+
+    env_root = _env_level("QV_LOG_LEVEL")
+    if env_root is not None:
+        logging.debug("QV_LOG_LEVEL=%s", env_root)
+        root = env_root
+        console = env_root
+
+    env_console = _env_level("QV_LOG_CONSOLE_LEVEL")
+    if env_console is not None:
+        logging.debug("QV_LOG_CONSOLE_LEVEL=%s", env_console)
+        console = env_console
+
+    env_file = _env_level("QV_LOG_FILE_LEVEL")
+    if env_file is not None:
+        logging.debug("QV_LOG_FILE_LEVEL=%s", env_file)
+        file = env_file
+
+    root = min(root, console, file)
+    return root, console, file
+
+
+def build_config(
+        app_name: str,
+        root_level: int,
+        console_level: int,
+        log_dir: Path | None = None,
+) -> dict:
+    """Build a logging config dict (wiring only, no policy logic).
+
+    Args:
+          app_name: Application name
+          root_level: Root logger level
+          console_level: Console handler level
+          log_dir: Log directory. Defaults to default_log_dir(app_name)
+
+    Returns:
+          Dict config for logging.config.dictConfig()
+    """
     log_dir = log_dir or default_log_dir(app_name)
     log_file = str(log_dir / f"{app_name}.log")
 
-    fmt = "%(asctime)s.%(msecs)03dZ %(levelname)s %(process)d %(threadName)s %(name)s %(message)s"
-    datefmt = "%Y-%m-%dT%H:%M:%S"
+    fmt = LOG_FORMAT
+    datefmt = LOG_DATEFMT
+
+    # Convert int level to string for dictConfig
+    root_level_name = logging.getLevelName(root_level)
+    console_level_name = logging.getLevelName(console_level)
+
+    file_settings = FileLogSettings(
+        filename=log_file,
+        maxBytes=1024 * 1024 * 5,
+        backupCount=int(os.getenv("QV_LOG_BACKUP_COUNT", 5)),
+        encoding="utf-8",
+        format=fmt,
+        datefmt=datefmt,
+    )
+
     return {
         "version": 1,
         "disable_existing_loggers": False,
@@ -173,25 +272,86 @@ def build_config(app_name: str, level: str = None, log_dir: Path | None = None) 
         "handlers": {
             # キューを使う
             "queue": {"class": "logging.handlers.QueueHandler", "queue": queue.Queue(-1)},
-            "console": {"class": "logging.StreamHandler", "formatter": "standard", "level": "INFO"},
+            "console": {
+                "class": "logging.StreamHandler",
+                "formatter": "standard",
+                "level": console_level_name},
         },
-        "root": {"level": level, "handlers": ["queue", "console"]},
+        "root": {"level": root_level_name, "handlers": ["queue", "console"]},
         # キュー先でファイルに書き込む
-        "_file_settings": {
-            "filename": log_file,
-            "maxBytes": 1024 * 1024 * 5,
-            "backupCount": int(os.getenv("QV_LOG_BACKUP_COUNT", 5)),
-            "encoding": "utf-8",
-            "format": fmt,
-            "datefmt": datefmt
-        },
+        "_file_settings": asdict(file_settings),
     }
 
 
 class LogSystem:
-    """QueueListener を持つ薄いラッパ"""
-    def __init__(self, app_name: str, level: str | None = None):
-        cfg = build_config(app_name, level)
+    """QueueListener を持つ薄いラッパ
+
+    - 通常経路: settings からログレベルを決定
+    - 例外経路: テスト/ツール向けに from_levels を用意
+    """
+
+    def __init__(self, app_name: str, *, settings: AppSettingsManager):
+        """Initialize LogSystem with settings (production path).
+
+        Args:
+            app_name: Application name
+            settings: AppSettingsManager to derive log levels from run_mode
+        """
+        root_level, console_level, file_level = _compute_levels_from_settings(settings)
+
+        logging.info(
+            "LogSystem initialized: run_mode=%s -> root=%s, console=%s, file=%s",
+            settings.run_mode,
+            logging.getLevelName(root_level),
+            logging.getLevelName(console_level),
+            logging.getLevelName(file_level)
+        )
+        self._init_with_levels(app_name, root_level, console_level, file_level)
+
+    @classmethod
+    def from_levels(
+            cls,
+            app_name: str,
+            *,
+            root_level: int = logging.INFO,
+            console_level: int = logging.INFO,
+            file_level: int = logging.DEBUG
+    ) -> "LogSystem":
+        """Create LogSystem with explicit levels (test/tool escape hatch).
+
+        Args:
+            app_name: Application name
+            root_level: Root logger level
+            console_level: Console handler level
+            file_level: File handler level
+
+        Returns:
+            LogSystem instance
+        """
+        instance = cls.__new__(cls)
+        instance._init_with_levels(app_name, root_level, console_level, file_level)
+        return instance
+
+    def _init_with_levels(
+            self,
+            app_name: str,
+            root_level: int,
+            console_level: int,
+            file_level: int
+    ) -> None:
+        """Internal initialization with explicit levels."""
+
+        # Clear existing handlers Before dictConfig to avoid conflicts
+        root_logger = logging.getLogger()
+        if root_logger.handlers:
+            for h in list(root_logger.handlers):
+                root_logger.removeHandler(h)
+                try:
+                    h.close()
+                except Exception:
+                    pass
+
+        cfg = build_config(app_name, root_level, console_level)
         logging.config.dictConfig(cfg)
 
         # dictConfigでは QueueHandler の queue取得が面倒なので探す
@@ -209,10 +369,10 @@ class LogSystem:
 
         root_logger = logging.getLogger()
         for h in root_logger.handlers:
-            if self._console_handler is None and isinstance(h, logging.StreamHandler):
+            # QueueHandler 以外のStreamHandler を探す
+            if isinstance(h, logging.StreamHandler) and not isinstance(h, QueueHandler):
                 self._console_handler = h
-            if self._file_handler is None and isinstance(h, logging.FileHandler):
-                self._file_handler = h
+                break
 
         # ファイル側ハンドラを準備する
         file_settings = cfg["_file_settings"]
@@ -223,12 +383,14 @@ class LogSystem:
             encoding=file_settings["encoding"],
         )
         file_handler.setFormatter(logging.Formatter(file_settings["format"], file_settings["datefmt"]))
+        file_handler.setLevel(file_level)
+        self._file_handler = file_handler
 
         self.listener = QueueListener(qh.queue, file_handler, respect_handler_level=True)
         self.listener.start()
 
     def apply_levels(self, root_level: int, console_level:int | None = None, file_level: int | None = None) -> None:
-        """起動後にログレベルを更新する"""
+        """起動後にログレベルを更新する（主にテスト･デバッグ用）"""
         logging.getLogger().setLevel(root_level)
         if self._console_handler is not None and console_level is not None:
             self._console_handler.setLevel(console_level)
@@ -241,49 +403,19 @@ class LogSystem:
 
 
 def apply_logging_policy(logs: LogSystem, settings: AppSettingsManager) -> None:
-    """run_mode を主としてログレベルを決定する。必要に応じて環境変数で一時上書きが可能にする。
+    """Deprecated: LogSystemの初期化時にsettings を渡すことを推奨。
 
-    優先度:
-      1) 環境変数(運用･サポート用)
-      2) run_mode (通常運用)
-
-    環境変数:
-      - QV_LOG_LEVEL: root/ console を一括指定
-      - QV_LOG_CONSOLE_LEVEL: console のみ指定
-      - QV_LOG_FILE_LEVEL: file のみ指定
+    後方互換性のため残しているが、新規コードでは使用しない。
+    代わりに、 LogSystem(app_name, settings=settings) を使用する。
     """
-    mode = settings.run_mode
-    logging.debug("Logging policy: run_mode=%s", mode)
+    warnings.warn(
+        "apply_logging_policy() is deprecated."
+        "Pass settings to LogSystem(app_name, settings=...) instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
-    # --- base policy by run_mode ---
-    if mode in (RunMode.DEVELOPMENT, RunMode.VERBOSE):
-        root = logging.DEBUG
-        console = logging.DEBUG
-        file = logging.DEBUG
-    else:
-        root = logging.INFO
-        console = logging.INFO
-        file = logging.DEBUG
-
-    def _env_level(name: str) -> int | None:
-        v = os.getenv(name)
-        if not v:
-            return None
-        return getattr(logging, v.upper(), None)
-
-    env_root = _env_level("QV_LOG_LEVEL")
-    if env_root is not None:
-        root = env_root
-        console = env_root
-
-    env_console = _env_level("QV_LOG_CONSOLE_LEVEL")
-    if env_console is not None:
-        console = env_console
-
-    env_file = _env_level("QV_LOG_FILE_LEVEL")
-    if env_file is not None:
-        file = env_file
-
+    root, console, file = _compute_levels_from_settings(settings)
     logs.apply_levels(root_level=root, console_level=console, file_level=file)
 
 
