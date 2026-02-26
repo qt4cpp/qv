@@ -170,9 +170,9 @@ def setup_startup_logging(
 
 
 def default_log_dir(app_name: str) -> Path:
-    base = Path.home() / "Library" / "Logs" / app_name
-    base.mkdir(parents=True, exist_ok=True)
-    return base
+    # Keep runtime logs aligned with startup logs and avoid macOS-specific paths
+    # on Linux/Windows.
+    return _find_writable_log_dir(app_name)
 
 
 def _compute_levels_from_settings(settings: AppSettingsManager) -> tuple[int, int, int]:

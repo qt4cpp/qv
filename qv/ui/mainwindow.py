@@ -282,7 +282,18 @@ class MainWindow(QMainWindow):
         if self.volume_viewer._source_image is None:
             return
 
-        self.histgram_widget.set_data(vtk_helpers.vtk_image_to_numpy(self.volume_viewer._source_image))
+        n_points = int(self.volume_viewer._source_image.GetNumberOfPoints())
+        target_samples = 2_000_000
+        sampling = max(1, int((n_points + target_samples - 1) / target_samples))
+        logger.info(
+            "Histogram sampling: n_points=%s sampling=%s (~%s samples)",
+            n_points,
+            sampling,
+            max(1, n_points // sampling),
+        )
+        self.histgram_widget.set_data(
+            vtk_helpers.vtk_image_to_numpy(self.volume_viewer._source_image, sampling=sampling)
+        )
 
         if self.volume_viewer.volume_property:
             self.histgram_widget.update_opacity_curve(

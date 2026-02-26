@@ -94,6 +94,7 @@ class VolumeViewer(BaseViewer):
         self.clipper_polydata = vtk.vtkPolyData()
         self.clipper_mapper = vtk.vtkPolyDataMapper()
         self.preview_extrude_actor: vtk.vtkActor | None = None
+        self._opengl_info_logged = False
 
         super().__init__(settings_manager=settings_manager, parent=parent)
         self.vtk_widget.installEventFilter(self)
@@ -297,12 +298,11 @@ class VolumeViewer(BaseViewer):
         self._source_image = vtk_helpers.load_dicom_series(dicon_dir)
         self.scalar_range = self._source_image.GetScalarRange()
 
-        level = round(min(4096.0, sum(self.scalar_range) / 2.0))
-        width = round(min(level / 2.0, 1024.0))
+        min_scalar, max_scalar = self.scalar_range
+        scalar_width = max(1.0, float(max_scalar - min_scalar))
+        level = round((min_scalar + max_scalar) / 2.0)
+        width = round(max(1.0, min(scalar_width, 1024.0)))
         self._window_settings = WindowSettings(level=level, width=width)
-
-        mapper = vtk.vtkGPUVolumeRayCastMapper()
-        mapper.SetInputData(self._source_image)
 
         self.color_func = vtk.vtkColorTransferFunction()
         self.opacity_func = vtk.vtkPiecewiseFunction()
@@ -312,6 +312,38 @@ class VolumeViewer(BaseViewer):
         self.volume_property.SetScalarOpacity(self.opacity_func)
         self.volume_property.ShadeOn()
         self.volume_property.SetInterpolationTypeToLinear()
+
+        mapper = vtk.vtkGPUVolumeRayCastMapper()
+        gpu_supported = False
+        render_window = self.vtk_widget.GetRenderWindow()
+        try:
+            # Preferred signature in many VTK builds:
+            # IsRenderSupported(vtkRenderWindow, vtkVolumeProperty)
+            gpu_supported = bool(mapper.IsRenderSupported(render_window, self.volume_property))
+        except TypeError:
+            try:
+                # Some Python wrappers expose a reduced signature:
+                # IsRenderSupported(vtkVolumeProperty)
+                gpu_supported = bool(mapper.IsRenderSupported(self.volume_property))
+            except Exception:
+                logger.exception("[VolumeViewer] Failed to query GPU render support.")
+                gpu_supported = False
+        except Exception:
+            logger.exception("[VolumeViewer] Failed to query GPU render support.")
+            gpu_supported = False
+
+        if gpu_supported:
+            logger.info("[VolumeViewer] Using vtkGPUVolumeRayCastMapper.")
+        else:
+            logger.warning(
+                "[VolumeViewer] GPU volume render is not supported in this runtime. "
+                "Falling back to vtkSmartVolumeMapper."
+            )
+            mapper = vtk.vtkSmartVolumeMapper()
+            mapper.SetRequestedRenderModeToDefault()
+        if hasattr(mapper, "AutoAdjustSampleDistancesOn"):
+            mapper.AutoAdjustSampleDistancesOn()
+        mapper.SetInputData(self._source_image)
 
         self.volume = vtk.vtkVolume()
         self.volume.SetMapper(mapper)
@@ -347,6 +379,7 @@ class VolumeViewer(BaseViewer):
 
         self.update_transfer_functions()
         self.update_view()
+        self._log_opengl_info_once()
 
         # Reset history and clipping state when data changes (spec requirement)
         self.history.clear()
@@ -359,6 +392,53 @@ class VolumeViewer(BaseViewer):
             "Volume loaded: extent=%s spacing=%s origin=%s",
             self._source_image.GetExtent(), self._source_image.GetSpacing(), self._source_image.GetOrigin()
         )
+
+    def _log_opengl_info_once(self) -> None:
+        """Log OpenGL runtime information once per viewer instance."""
+        if self._opengl_info_logged:
+            return
+
+        rw = self.vtk_widget.GetRenderWindow()
+        if rw is None:
+            return
+
+        try:
+            supports_gl = rw.SupportsOpenGL() if hasattr(rw, "SupportsOpenGL") else None
+            is_direct = rw.IsDirect() if hasattr(rw, "IsDirect") else None
+            logger.info(
+                "[OpenGL] SupportsOpenGL=%s IsDirect=%s RenderWindow=%s",
+                supports_gl,
+                is_direct,
+                type(rw).__name__,
+            )
+
+            if not hasattr(rw, "ReportCapabilities"):
+                logger.warning("[OpenGL] ReportCapabilities is not available on this RenderWindow.")
+                self._opengl_info_logged = True
+                return
+
+            caps = rw.ReportCapabilities() or ""
+            vendor = None
+            renderer = None
+            version = None
+            for raw_line in caps.splitlines():
+                line = raw_line.strip()
+                if line.startswith("OpenGL vendor string:"):
+                    vendor = line.split(":", 1)[1].strip()
+                elif line.startswith("OpenGL renderer string:"):
+                    renderer = line.split(":", 1)[1].strip()
+                elif line.startswith("OpenGL version string:"):
+                    version = line.split(":", 1)[1].strip()
+
+            logger.info(
+                "[OpenGL] vendor=%s renderer=%s version=%s",
+                vendor or "unknown",
+                renderer or "unknown",
+                version or "unknown",
+            )
+            self._opengl_info_logged = True
+        except Exception:
+            logger.exception("[OpenGL] Failed to query OpenGL capabilities.")
 
     # =====================================================
     # Undo / Redo

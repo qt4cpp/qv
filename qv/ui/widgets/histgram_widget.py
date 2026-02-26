@@ -42,18 +42,22 @@ class HistogramWidget(pg.PlotWidget):
             self.set_data(data)
 
     @log_io(level=logging.DEBUG)
-    def set_data(self, data: np.ndarray, bins: int = 200):
+    def set_data(self, data: np.ndarray, bins: int = 200, max_samples: int = 2_000_000):
         """
         Set the data for the histogram.
         :param data: numpy array
         :param bins: datastore for the histogram
         :return: None
         """
-        flat = data.flatten()
+        flat = np.ravel(data)
+        if max_samples > 0 and flat.size > max_samples:
+            stride = int(np.ceil(flat.size / max_samples))
+            flat = flat[::stride]
         counts, edges = np.histogram(flat, bins=bins)
         _, y_hi = np.percentile(counts, [0, 98])
         self.setYRange(min=0, max=y_hi)
-        centers = edges[:-1] + edges[1:] / 2
+        centers = (edges[:-1] + edges[1:]) / 2
+        self.clear()
         self.plot(
             x=centers,
             y=counts,
@@ -120,4 +124,3 @@ def minimum_show_histgram_window():
     for i in range(3):
         plot_widget.plot(x, y[i], pen=pg.mkPen(color=(255, 255, i*18), width=2))
     plot_widget.show()
-
