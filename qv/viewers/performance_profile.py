@@ -17,7 +17,7 @@ class PerformanceProfile:
     name: str
     shade_enabled: bool
     image_sample_distance: float
-    auto_adjust_sample_distance: bool
+    auto_adjust_sample_distances: bool
     interactive_image_sample_distance: float
     interactive_shade_enabled: bool
 
@@ -31,16 +31,16 @@ _PRESETS: Final[dict[str, PerformanceProfile]] = {
     "speed": PerformanceProfile(
         name="speed",
         shade_enabled=False,
-        image_sample_distance=2.0,
-        auto_adjust_sample_distance=True,
-        interactive_image_sample_distance=4.0,
+        image_sample_distance=1.5,
+        auto_adjust_sample_distances=True,
+        interactive_image_sample_distance=2.5,
         interactive_shade_enabled=False,
     ),
     "balanced": PerformanceProfile(
         name="balanced",
         shade_enabled=True,
-        image_sample_distance=1.0,
-        auto_adjust_sample_distance=True,
+        image_sample_distance=0.5,
+        auto_adjust_sample_distances=True,
         interactive_image_sample_distance=2.5,
         interactive_shade_enabled=False,
     ),
@@ -48,8 +48,8 @@ _PRESETS: Final[dict[str, PerformanceProfile]] = {
         name="quality",
         shade_enabled=True,
         image_sample_distance=0.5,
-        auto_adjust_sample_distance=False,
-        interactive_image_sample_distance=1.5,
+        auto_adjust_sample_distances=False,
+        interactive_image_sample_distance=0.5,
         interactive_shade_enabled=True,
     ),
 }

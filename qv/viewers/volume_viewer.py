@@ -26,7 +26,7 @@ from vtkmodules.vtkCommonDataModel import vtkImplicitSelectionLoop
 
 from qv.core.history import Command, HistoryManager
 from qv.core.states import ClippingState
-
+from qv.viewers.performance_profile import PerformanceProfile, get_profile
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +95,10 @@ class VolumeViewer(BaseViewer):
         self.clipper_mapper = vtk.vtkPolyDataMapper()
         self.preview_extrude_actor: vtk.vtkActor | None = None
         self._opengl_info_logged = False
+
+        # Performance profile state
+        self._performance_profile: PerformanceProfile = get_profile("balanced")
+        self._interactive_quality_enabled: bool = False
 
         super().__init__(settings_manager=settings_manager, parent=parent)
         self.vtk_widget.installEventFilter(self)
@@ -349,6 +353,8 @@ class VolumeViewer(BaseViewer):
         self.volume.SetMapper(mapper)
         self.volume.SetProperty(self.volume_property)
 
+        self.set_profile(self._performance_profile)
+
         self.renderer.AddVolume(self.volume)
         
         self._init_mask_pipeline()
@@ -392,6 +398,59 @@ class VolumeViewer(BaseViewer):
             "Volume loaded: extent=%s spacing=%s origin=%s",
             self._source_image.GetExtent(), self._source_image.GetSpacing(), self._source_image.GetOrigin()
         )
+
+    def set_profile(self, profile: PerformanceProfile | str) -> None:
+        """
+        Apply a rendering performance profile to the current volume pipeline.
+
+        :param profile: Performance profile or preset name.
+        """
+        resolved = get_profile(profile) if isinstance(profile, str) else profile
+        self._performance_profile = resolved
+        self._apply_profile(interactive=self._interactive_quality_enabled)
+        logger.info(
+            "[VolumeViewer] Performance profile set to %s (interactive=%s)",
+            resolved.name, self._interactive_quality_enabled,
+        )
+
+    def _apply_profile(self, interactive: bool) -> None:
+        """Apply profile values to mapper/property if volume is ready."""
+        if self.volume is None or self.volume_property is None:
+            return
+
+        profile = self._performance_profile
+        mapper = self.volume.GetMapper()
+        if mapper is None:
+            return
+
+        shade_enabled = profile.interactive_shade_enabled if interactive else profile.shade_enabled
+        if shade_enabled:
+            self.volume_property.ShadeOn()
+        else:
+            self.volume_property.ShadeOff()
+
+        # --- AutoAdjustSampleDistance 設定する
+        if hasattr(mapper, "AutoAdjustSampleDistancesOn"):
+            if interactive:
+                mapper.AutoAdjustSampleDistancesOff()
+            else:
+                if profile.auto_adjust_sample_distances:
+                    mapper.AutoAdjustSampleDistancesOn()
+                else:
+                    mapper.AutoAdjustSampleDistancesOff()
+
+        # --- ImageSampleDistance を設定する
+        if hasattr(mapper, "SetImageSampleDistance"):
+            if interactive:
+                mapper.SetImageSampleDistance(profile.interactive_image_sample_distance)
+            elif not profile.auto_adjust_sample_distances:
+                # auto adjust が有効な場合は、VTKに任せる(手動値を上書きしない）
+                mapper.SetImageSmampleDistance(profile.image_sample_distance)
+            else:
+                mapper.SetImageSampleDistance(1.0)
+
+        self.volume_property.Modified()
+        mapper.Modified()
 
     def _log_opengl_info_once(self) -> None:
         """Log OpenGL runtime information once per viewer instance."""
@@ -439,6 +498,14 @@ class VolumeViewer(BaseViewer):
             self._opengl_info_logged = True
         except Exception:
             logger.exception("[OpenGL] Failed to query OpenGL capabilities.")
+
+    def apply_interactive_quality(self, enabled: bool) -> None:
+        """インタラクション中の品質と週後の品質を切り替える"""
+        self._interactive_quality_enabled = bool(enabled)
+        self._apply_profile(interactive=self._interactive_quality_enabled)
+
+        QtCore.QTimer.singleShot(0, self.update_view)
+        logger.debug(f"Interactive quality applied: {enabled}")
 
     # =====================================================
     # Undo / Redo
