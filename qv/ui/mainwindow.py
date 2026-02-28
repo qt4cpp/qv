@@ -2,7 +2,7 @@ import logging
 from pathlib import Path
 
 from PySide6 import QtCore
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QSplitter,
                                QHBoxLayout, QLabel, QPushButton)
 
@@ -113,6 +113,28 @@ class MainWindow(QMainWindow):
         view_menu.addAction("2x zoom", self.volume_viewer.set_zoom_2x)
         view_menu.addAction("0.5x zoom", self.volume_viewer.set_zoom_half)
 
+        view_menu.addSeparator()
+        perf_menu = view_menu.addMenu("Performance Profile")
+
+        self._perf_profile_group = QActionGroup(self)
+        self._perf_profile_group.setExclusive(True)
+        self._perf_profile_actions: dict[str, QAction] = {}
+
+        for profile_name in ("speed", "balanced", "quality"):
+            action = QAction(profile_name.capitalize(), self)
+            action.setCheckable(True)
+            action.triggered.connect(
+                lambda checked, name=profile_name: self._on_select_perf_profile(name, checked)
+            )
+            self._perf_profile_group.addAction(action)
+            self._perf_profile_actions[profile_name] = action
+            perf_menu.addAction(action)
+
+        # 初期チェック
+        current_profile = self.volume_viewer.current_profile_name
+        if current_profile in self._perf_profile_actions:
+            self._perf_profile_actions[current_profile].setChecked(True)
+
         # Edit menu
         edit_menu = menubar.addMenu("&Edit")
         edit_menu.addAction("&Clip inside", self._start_clip_inside)
@@ -131,6 +153,11 @@ class MainWindow(QMainWindow):
         edit_menu.addAction(self.redo_action)
 
         self._update_undo_redo_enabled()
+
+    def _on_select_perf_profile(self, profile_name: str, checked: bool) -> None:
+        if not checked:
+            return
+        self.volume_viewer.set_profile(profile_name)
 
     def _update_undo_redo_enabled(self):
         """Synchronize the enabled status of Undo/Redo actions with the history manager."""

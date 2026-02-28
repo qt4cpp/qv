@@ -415,6 +415,10 @@ class VolumeViewer(BaseViewer):
             resolved.name, self._interactive_quality_enabled,
         )
 
+    @property
+    def current_profile_name(self) -> str:
+        return self._performance_profile.name
+
     def _apply_profile(self, interactive: bool) -> None:
         """Apply profile values to mapper/property if volume is ready."""
         if self.volume is None or self.volume_property is None:
