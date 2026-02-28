@@ -97,7 +97,7 @@ class VolumeViewer(BaseViewer):
         self._opengl_info_logged = False
 
         # Performance profile state
-        self._performance_profile: PerformanceProfile = get_profile("balanced")
+        self._performance_profile: PerformanceProfile = get_profile("quality")
         self._interactive_quality_enabled: bool = False
 
         super().__init__(settings_manager=settings_manager, parent=parent)
@@ -396,7 +396,9 @@ class VolumeViewer(BaseViewer):
 
         logger.info(
             "Volume loaded: extent=%s spacing=%s origin=%s",
-            self._source_image.GetExtent(), self._source_image.GetSpacing(), self._source_image.GetOrigin()
+            self._source_image.GetExtent(),
+            self._source_image.GetSpacing(),
+            self._source_image.GetOrigin()
         )
 
     def set_profile(self, profile: PerformanceProfile | str) -> None:
@@ -445,9 +447,19 @@ class VolumeViewer(BaseViewer):
                 mapper.SetImageSampleDistance(profile.interactive_image_sample_distance)
             elif not profile.auto_adjust_sample_distances:
                 # auto adjust が有効な場合は、VTKに任せる(手動値を上書きしない）
-                mapper.SetImageSmampleDistance(profile.image_sample_distance)
+                mapper.SetImageSampleDistance(profile.image_sample_distance)
             else:
+                # auto adjust On にするときは、明示的にデフォルト値
                 mapper.SetImageSampleDistance(1.0)
+
+        if hasattr(mapper, "UseJitteringOn") and hasattr(mapper, "UseJitteringOff"):
+            use_jittering = (
+                profile.interactive_use_jittering if interactive else profile.use_jittering
+            )
+            if use_jittering:
+                mapper.UseJitteringOn()
+            else:
+                mapper.UseJitteringOff()
 
         self.volume_property.Modified()
         mapper.Modified()
