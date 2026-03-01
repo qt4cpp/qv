@@ -1,6 +1,7 @@
 """Volume viewer widget for 3d DICOM images."""
 import logging
 import math
+import time
 import zlib
 from typing import Sequence
 from collections import OrderedDict
@@ -16,7 +17,7 @@ import qv.utils.vtk_helpers as vtk_helpers
 from qv.app.app_settings_manager import AppSettingsManager
 from qv.core import geometry_utils
 from qv.core.window_settings import WindowSettings
-from qv.utils.log_util import log_io
+from qv.utils.log_util import log_io, log_kpi
 from qv.operations.clipping.clipping_operation import ClippingOperation, CLIPPED_SCALAR, ClipMode
 from qv.viewers.interactor_styles.clipping_interactor_style import ClippingInteractorStyle
 from qv.viewers.base_viewer import BaseViewer
@@ -26,7 +27,7 @@ from vtkmodules.vtkCommonDataModel import vtkImplicitSelectionLoop
 
 from qv.core.history import Command, HistoryManager
 from qv.core.states import ClippingState
-
+from qv.viewers.performance_profile import PerformanceProfile, get_profile
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +95,11 @@ class VolumeViewer(BaseViewer):
         self.clipper_polydata = vtk.vtkPolyData()
         self.clipper_mapper = vtk.vtkPolyDataMapper()
         self.preview_extrude_actor: vtk.vtkActor | None = None
+        self._opengl_info_logged = False
+
+        # Performance profile state
+        self._performance_profile: PerformanceProfile = get_profile("quality")
+        self._interactive_quality_enabled: bool = False
 
         super().__init__(settings_manager=settings_manager, parent=parent)
         self.vtk_widget.installEventFilter(self)
@@ -293,16 +299,17 @@ class VolumeViewer(BaseViewer):
         :param dicon_dir: Path to a directory containing DICOM files
         """
         logger.info(f"Loading volume from {dicon_dir}")
+        self._load_start_t = time.perf_counter()
+        self._first_time_logged = False
 
         self._source_image = vtk_helpers.load_dicom_series(dicon_dir)
         self.scalar_range = self._source_image.GetScalarRange()
 
-        level = round(min(4096.0, sum(self.scalar_range) / 2.0))
-        width = round(min(level / 2.0, 1024.0))
+        min_scalar, max_scalar = self.scalar_range
+        scalar_width = max(1.0, float(max_scalar - min_scalar))
+        level = round((min_scalar + max_scalar) / 2.0)
+        width = round(max(1.0, min(scalar_width, 1024.0)))
         self._window_settings = WindowSettings(level=level, width=width)
-
-        mapper = vtk.vtkGPUVolumeRayCastMapper()
-        mapper.SetInputData(self._source_image)
 
         self.color_func = vtk.vtkColorTransferFunction()
         self.opacity_func = vtk.vtkPiecewiseFunction()
@@ -313,9 +320,43 @@ class VolumeViewer(BaseViewer):
         self.volume_property.ShadeOn()
         self.volume_property.SetInterpolationTypeToLinear()
 
+        mapper = vtk.vtkGPUVolumeRayCastMapper()
+        gpu_supported = False
+        render_window = self.vtk_widget.GetRenderWindow()
+        try:
+            # Preferred signature in many VTK builds:
+            # IsRenderSupported(vtkRenderWindow, vtkVolumeProperty)
+            gpu_supported = bool(mapper.IsRenderSupported(render_window, self.volume_property))
+        except TypeError:
+            try:
+                # Some Python wrappers expose a reduced signature:
+                # IsRenderSupported(vtkVolumeProperty)
+                gpu_supported = bool(mapper.IsRenderSupported(self.volume_property))
+            except Exception:
+                logger.exception("[VolumeViewer] Failed to query GPU render support.")
+                gpu_supported = False
+        except Exception:
+            logger.exception("[VolumeViewer] Failed to query GPU render support.")
+            gpu_supported = False
+
+        if gpu_supported:
+            logger.info("[VolumeViewer] Using vtkGPUVolumeRayCastMapper.")
+        else:
+            logger.warning(
+                "[VolumeViewer] GPU volume render is not supported in this runtime. "
+                "Falling back to vtkSmartVolumeMapper."
+            )
+            mapper = vtk.vtkSmartVolumeMapper()
+            mapper.SetRequestedRenderModeToDefault()
+        if hasattr(mapper, "AutoAdjustSampleDistancesOn"):
+            mapper.AutoAdjustSampleDistancesOn()
+        mapper.SetInputData(self._source_image)
+
         self.volume = vtk.vtkVolume()
         self.volume.SetMapper(mapper)
         self.volume.SetProperty(self.volume_property)
+
+        self.set_profile(self._performance_profile)
 
         self.renderer.AddVolume(self.volume)
         
@@ -347,6 +388,8 @@ class VolumeViewer(BaseViewer):
 
         self.update_transfer_functions()
         self.update_view()
+        self._log_opengl_info_once()
+        self.vtk_widget.GetRenderWindow().AddObserver("EndEvent", self._on_render_end)
 
         # Reset history and clipping state when data changes (spec requirement)
         self.history.clear()
@@ -357,8 +400,141 @@ class VolumeViewer(BaseViewer):
 
         logger.info(
             "Volume loaded: extent=%s spacing=%s origin=%s",
-            self._source_image.GetExtent(), self._source_image.GetSpacing(), self._source_image.GetOrigin()
+            self._source_image.GetExtent(),
+            self._source_image.GetSpacing(),
+            self._source_image.GetOrigin()
         )
+
+    def set_profile(self, profile: PerformanceProfile | str) -> None:
+        """
+        Apply a rendering performance profile to the current volume pipeline.
+
+        :param profile: Performance profile or preset name.
+        """
+        resolved = get_profile(profile) if isinstance(profile, str) else profile
+        self._performance_profile = resolved
+        self._apply_profile(interactive=self._interactive_quality_enabled)
+        logger.info(
+            "[VolumeViewer] Performance profile set to %s (interactive=%s)",
+            resolved.name, self._interactive_quality_enabled,
+        )
+
+    @property
+    def current_profile_name(self) -> str:
+        return self._performance_profile.name
+
+    def _apply_profile(self, interactive: bool) -> None:
+        """Apply profile values to mapper/property if volume is ready."""
+        if self.volume is None or self.volume_property is None:
+            return
+
+        profile = self._performance_profile
+        mapper = self.volume.GetMapper()
+        if mapper is None:
+            return
+
+        shade_enabled = profile.interactive_shade_enabled if interactive else profile.shade_enabled
+        if shade_enabled:
+            self.volume_property.ShadeOn()
+        else:
+            self.volume_property.ShadeOff()
+
+        # --- AutoAdjustSampleDistance 設定する
+        if hasattr(mapper, "AutoAdjustSampleDistancesOn"):
+            if interactive:
+                mapper.AutoAdjustSampleDistancesOff()
+            else:
+                if profile.auto_adjust_sample_distances:
+                    mapper.AutoAdjustSampleDistancesOn()
+                else:
+                    mapper.AutoAdjustSampleDistancesOff()
+
+        # --- ImageSampleDistance を設定する
+        if hasattr(mapper, "SetImageSampleDistance"):
+            if interactive:
+                mapper.SetImageSampleDistance(profile.interactive_image_sample_distance)
+            elif not profile.auto_adjust_sample_distances:
+                # auto adjust が有効な場合は、VTKに任せる(手動値を上書きしない）
+                mapper.SetImageSampleDistance(profile.image_sample_distance)
+            else:
+                # auto adjust On にするときは、明示的にデフォルト値
+                mapper.SetImageSampleDistance(1.0)
+
+        if hasattr(mapper, "UseJitteringOn") and hasattr(mapper, "UseJitteringOff"):
+            use_jittering = (
+                profile.interactive_use_jittering if interactive else profile.use_jittering
+            )
+            if use_jittering:
+                mapper.UseJitteringOn()
+            else:
+                mapper.UseJitteringOff()
+
+        self.volume_property.Modified()
+        mapper.Modified()
+
+    def _log_opengl_info_once(self) -> None:
+        """Log OpenGL runtime information once per viewer instance."""
+        if self._opengl_info_logged:
+            return
+
+        rw = self.vtk_widget.GetRenderWindow()
+        if rw is None:
+            return
+
+        try:
+            supports_gl = rw.SupportsOpenGL() if hasattr(rw, "SupportsOpenGL") else None
+            is_direct = rw.IsDirect() if hasattr(rw, "IsDirect") else None
+            logger.info(
+                "[OpenGL] SupportsOpenGL=%s IsDirect=%s RenderWindow=%s",
+                supports_gl,
+                is_direct,
+                type(rw).__name__,
+            )
+
+            if not hasattr(rw, "ReportCapabilities"):
+                logger.warning("[OpenGL] ReportCapabilities is not available on this RenderWindow.")
+                self._opengl_info_logged = True
+                return
+
+            caps = rw.ReportCapabilities() or ""
+            vendor = None
+            renderer = None
+            version = None
+            for raw_line in caps.splitlines():
+                line = raw_line.strip()
+                if line.startswith("OpenGL vendor string:"):
+                    vendor = line.split(":", 1)[1].strip()
+                elif line.startswith("OpenGL renderer string:"):
+                    renderer = line.split(":", 1)[1].strip()
+                elif line.startswith("OpenGL version string:"):
+                    version = line.split(":", 1)[1].strip()
+
+            logger.info(
+                "[OpenGL] vendor=%s renderer=%s version=%s",
+                vendor or "unknown",
+                renderer or "unknown",
+                version or "unknown",
+            )
+            self._opengl_info_logged = True
+        except Exception:
+            logger.exception("[OpenGL] Failed to query OpenGL capabilities.")
+
+    def apply_interactive_quality(self, enabled: bool) -> None:
+        """インタラクション中の品質と週後の品質を切り替える"""
+        self._interactive_quality_enabled = bool(enabled)
+        self._apply_profile(interactive=self._interactive_quality_enabled)
+
+        QtCore.QTimer.singleShot(0, self.update_view)
+        logger.debug(f"Interactive quality applied: {enabled}")
+
+    def _on_render_end(self, obj, event) -> None:
+        """初回レンダリング完了時に first_frame_ms に記録する"""
+        if self._first_time_logged or self._load_start_t is None:
+            return
+        self._first_time_logged = True
+        elapsed = (time.perf_counter() - self._load_start_t) * 1000.0
+        log_kpi("first_frame_ms", elapsed)
+        obj.RemoveObservers("EndEvent")
 
     # =====================================================
     # Undo / Redo

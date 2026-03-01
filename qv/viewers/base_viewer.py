@@ -149,7 +149,7 @@ class BaseViewer(QtWidgets.QWidget, metaclass=ABCQtMeta):
 
     def update_view(self) -> None:
         """Trigger a render."""
-        self.vtk_widget.GetRenderWindow().Render()
+        self.vtk_widget.Render()
 
     def reset_camera(self) -> None:
         """Reset the camera to the default position."""
