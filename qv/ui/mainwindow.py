@@ -179,6 +179,7 @@ class MainWindow(QMainWindow):
     # --- Button Hnadler ---
     # These handlers must call _update_undo_redo_enabled because they modify history.
 
+    @log_io(level=logging.INFO)
     def _apply_clipping(self) -> None:
         """Confirm the selection and push to history."""
         self.volume_viewer.apply_clipping()
