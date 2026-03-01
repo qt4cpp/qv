@@ -10,7 +10,8 @@ from qv.viewers.volume_viewer import VolumeViewer
 class MultiViewerPanel(QtWidgets.QWidget):
     """Container widget for multiple viewers."""
 
-    def __init__(self, settings_mgr: AppSettingsManager | None = None,
+    def __init__(self,
+                 settings_mgr: AppSettingsManager | None = None,
                  parent: QtWidgets.QWidget | None = None,
                  ) -> None:
         super().__init__(parent)
@@ -34,6 +35,9 @@ class MultiViewerPanel(QtWidgets.QWidget):
 
         layout.addWidget(self.splitter)
 
+        self.volume_viewer.dataLoaded.connect(self._on_volume_data_loaded)
+        self.volume_viewer.windowSettingsChanged.connect(self.mpr_viewer.set_window_settings)
+
     def add_viewer(self, viewer: QtWidgets.QWidget, name: str) -> None:
         """
         Add Viewer widget into panel
@@ -45,3 +49,10 @@ class MultiViewerPanel(QtWidgets.QWidget):
 
         self._viewers[name] = viewer
         self.splitter.addWidget(viewer)
+
+    def _on_volume_data_loaded(self) -> None:
+        """Push loaded vtkImageData to MPR viewer"""
+        image = self.volume_viewer.source_image
+        if image is None:
+            return
+        self.mpr_viewer.set_image_data(image)

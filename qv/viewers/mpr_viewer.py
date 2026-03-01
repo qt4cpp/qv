@@ -87,7 +87,7 @@ class MprViewer(BaseViewer):
         self.renderer.ResetCamera()
         self.update_view()
 
-    def setup_interactor(self) -> None:
+    def setup_interactor_style(self) -> None:
         """Use image interactor style (observer wiring will be added later)."""
         self._interactor_style = vtk.vtkInteractorStyleImage()
         self.interactor.SetInteractorStyle(self._interactor_style)
