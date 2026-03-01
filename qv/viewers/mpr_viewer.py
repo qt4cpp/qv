@@ -50,7 +50,7 @@ PLANE_AXES_INDEX: deict[MprPlane, int] = {
 class MprViewer(BaseViewer):
     """2D MPR viewer."""
 
-    def __init__(self, settings_manager_=None, parent=None) -> None:
+    def __init__(self, settings_manager=None, parent=None) -> None:
         self._image_data: vtk.vtkImageData | None = None
         self._plane: MprPlane = MprPlane.AXIAL
         self._slice_index: int = 0
@@ -62,7 +62,7 @@ class MprViewer(BaseViewer):
         self._window_settings: WindowSettings = WindowSettings(level=300.0, width=30.0)
         self._interactor_style: vtk.vtkInteractorStyleImage | None = None
 
-        super().__init__(settings_manager_, parent)
+        super().__init__(settings_manager, parent)
         self._setup_pipeline()
 
     def _setup_pipeline(self) -> None:
