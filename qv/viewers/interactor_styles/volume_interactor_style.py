@@ -1,4 +1,8 @@
+import time
+from qv.utils.log_util import log_kpi
+
 from vtkmodules.vtkInteractionStyle import vtkInteractorStyleTrackballCamera
+
 
 
 class VolumeViewerInteractorStyle(vtkInteractorStyleTrackballCamera):
@@ -8,6 +12,8 @@ class VolumeViewerInteractorStyle(vtkInteractorStyleTrackballCamera):
         self._last_pos = None
         self._mode = None  # rotate の状態変数
         self._interactive_active = False
+        self._interact_start: float | None = None
+        self._frame_count: int = 0
 
         self.RemoveObservers("LeftButtonPressEvent")
         self.AddObserver("LeftButtonPressEvent", self.on_left_button_down)
@@ -24,6 +30,15 @@ class VolumeViewerInteractorStyle(vtkInteractorStyleTrackballCamera):
         if self._interactive_active == active:
             return
         self._interactive_active = active
+        if active:
+            self._interact_start = time.perf_counter()
+            self.frame_count = 0
+        else:
+            if self._interact_start is not None and self._frame_count > 0:
+                elapsed = time.perf_counter() - self._interact_start
+                if elapsed > 0:
+                    log_kpi("interaction_fps", self._frame_count / elapsed, unit="fps")
+            self._interact_start = None
         if self.parent is not None and hasattr(self.parent, "apply_interactive_quality"):
             self.parent.apply_interactive_quality(active)
 
@@ -46,6 +61,9 @@ class VolumeViewerInteractorStyle(vtkInteractorStyleTrackballCamera):
         self._mode = 'ww/wl'
 
     def on_mouse_move(self, obj, event):
+        if self._interactive_active:
+            self._frame_count += 1
+
         if self._mode == 'spin':
             self.Spin()
         elif self._mode == 'rotate':
