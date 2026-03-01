@@ -79,3 +79,13 @@ def level_from_name(value: Any, default: int = logging.INFO) -> int:
             except AttributeError:
                 pass
     return default
+
+
+def log_kpi(key: str, value: float, unit: str = "ms") -> None:
+    """
+    KPI を key=value 形式で出力する
+
+    ログレベルは常に INFO. ログレベル設定で制御する。
+    """
+    logger.info("KPI %s=%.1f%s", key, value, unit)
+

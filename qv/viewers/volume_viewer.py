@@ -1,6 +1,7 @@
 """Volume viewer widget for 3d DICOM images."""
 import logging
 import math
+import time
 import zlib
 from typing import Sequence
 from collections import OrderedDict
@@ -16,7 +17,7 @@ import qv.utils.vtk_helpers as vtk_helpers
 from qv.app.app_settings_manager import AppSettingsManager
 from qv.core import geometry_utils
 from qv.core.window_settings import WindowSettings
-from qv.utils.log_util import log_io
+from qv.utils.log_util import log_io, log_kpi
 from qv.operations.clipping.clipping_operation import ClippingOperation, CLIPPED_SCALAR, ClipMode
 from qv.viewers.interactor_styles.clipping_interactor_style import ClippingInteractorStyle
 from qv.viewers.base_viewer import BaseViewer
@@ -298,6 +299,8 @@ class VolumeViewer(BaseViewer):
         :param dicon_dir: Path to a directory containing DICOM files
         """
         logger.info(f"Loading volume from {dicon_dir}")
+        self._load_start_t = time.perf_counter()
+        self._first_time_logged = False
 
         self._source_image = vtk_helpers.load_dicom_series(dicon_dir)
         self.scalar_range = self._source_image.GetScalarRange()
@@ -386,6 +389,7 @@ class VolumeViewer(BaseViewer):
         self.update_transfer_functions()
         self.update_view()
         self._log_opengl_info_once()
+        self.vtk_widget.GetRenderWindow().AddObserver("EndEvent", self._on_render_end)
 
         # Reset history and clipping state when data changes (spec requirement)
         self.history.clear()
@@ -522,6 +526,15 @@ class VolumeViewer(BaseViewer):
 
         QtCore.QTimer.singleShot(0, self.update_view)
         logger.debug(f"Interactive quality applied: {enabled}")
+
+    def _on_render_end(self, obj, event) -> None:
+        """初回レンダリング完了時に first_frame_ms に記録する"""
+        if self._first_time_logged or self._load_start_t is None:
+            return
+        self._first_time_logged = True
+        elapsed = (time.perf_counter() - self._load_start_t) * 1000.0
+        log_kpi("first_frame_ms", elapsed)
+        obj.RemoveObservers("EndEvent")
 
     # =====================================================
     # Undo / Redo
