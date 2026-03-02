@@ -13,7 +13,7 @@ from qv.core.window_settings import WindowSettings
 from qv.utils.log_util import log_io
 from qv.app.status import STATUS_FIELDS, StatusField
 from qv.app.shortcut_manager import ShortcutManager
-from qv.viewers.volume_viewer import VolumeViewer
+from qv.viewers.mpr_viewer import MprViewer, MprPlane
 from qv.ui.widgets.histgram_widget import HistogramWidget
 from qv.ui.widgets.multi_viewer_panel import MultiViewerPanel
 import qv.utils.vtk_helpers as vtk_helpers
@@ -117,6 +117,27 @@ class MainWindow(QMainWindow):
         view_menu.addAction("Reset Zoom", self.volume_viewer.reset_zoom)
         view_menu.addAction("2x zoom", self.volume_viewer.set_zoom_2x)
         view_menu.addAction("0.5x zoom", self.volume_viewer.set_zoom_half)
+        view_menu.addSeparator()
+        mpr_menu = view_menu.addMenu("MPR")
+
+        self._mpr_plane_group = QActionGroup(self)
+        self._mpr_plane_group.setExclusive(True)
+        self._mpr_plane_actions: dict[str, QAction] = {}
+
+        for label, plane in (
+            ("Axial", MprPlane.AXIAL),
+            ("Coronal", MprPlane.CORONAL),
+            ("Sagittal", MprPlane.SAGITTAL),
+        ):
+            action = QAction(label, self)
+            action.setCheckable(True)
+            action.triggered.connect(lambda checked, p=plane: self._on_select_mpr_plane(p, checked)
+            )
+            self._mpr_plane_group.addAction(action)
+            self._mpr_plane_actions[plane] = action
+            mpr_menu.addAction(action)
+
+        self._mpr_plane_actions[MprPlane.AXIAL].setChecked(True)
 
         view_menu.addSeparator()
         perf_menu = view_menu.addMenu("Performance Profile")
@@ -163,6 +184,11 @@ class MainWindow(QMainWindow):
         if not checked:
             return
         self.volume_viewer.set_profile(profile_name)
+
+    def _on_select_mpr_plane(self, plane: MprPlane, checked: bool) -> None:
+        if not checked:
+            return
+        self.mpr_viewer.set_plane(plane)
 
     def _update_undo_redo_enabled(self):
         """Synchronize the enabled status of Undo/Redo actions with the history manager."""
