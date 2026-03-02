@@ -56,10 +56,10 @@ class MprViewer(BaseViewer):
         self._slice_index: int = 0
 
         self._reslice: vtk.vtkImageReslice | None = None
-        self._color_map: vtk.vtkWindowLevelLookupTable | None = None
-        self._image_actor: vtk.vtkImageActor | None = None
-
+        self._wl_map: vtk.vtkImageMapToWindowLevelColors | None = None
         self._window_settings: WindowSettings = WindowSettings(level=300.0, width=30.0)
+
+        self._image_actor: vtk.vtkImageActor | None = None
         self._interactor_style: vtk.vtkInteractorStyleImage | None = None
 
         super().__init__(settings_manager, parent)
@@ -77,17 +77,13 @@ class MprViewer(BaseViewer):
         dummy.AllocateScalars(vtk.VTK_UNSIGNED_CHAR, 1)
         self._reslice.SetInputData(dummy)
 
-        self._color_map = vtk.vtkWindowLevelLookupTable()
-        self._color_map.SetWindow(self._window_settings.width)
-        self._color_map.SetLevel(self._window_settings.level)
-        self._color_map.Build()
-
-        map_to_color = vtk.vtkImageMapToColors()
-        map_to_color.SetLookupTable(self._color_map)
-        map_to_color.SetInputConnection(self._reslice.GetOutputPort())
+        self._wl_map = vtk.vtkImageMapToWindowLevelColors()
+        self._wl_map.SetInputConnection(self._reslice.GetOutputPort())
+        self._wl_map.SetWindow(self._window_settings.width)
+        self._wl_map.SetLevel(self._window_settings.level)
 
         self._image_actor = vtk.vtkImageActor()
-        self._image_actor.GetMapper().SetInputConnection(map_to_color.GetOutputPort())
+        self._image_actor.GetMapper().SetInputConnection(self._wl_map.GetOutputPort())
 
         self.renderer.AddActor(self._image_actor)
         self.renderer.ResetCamera()
@@ -109,6 +105,13 @@ class MprViewer(BaseViewer):
         self._image_data = image_data
         self._reslice.SetInputData(image_data)
         logger.info("MPR image data loaded")
+
+        smin, smax = image_data.GetScalarRange()
+        width = max(1.0, min(float(smax - smin), 1024))
+        level = (float(smin) + float(smax)) / 2.0
+        self._window_settings = WindowSettings(level=level, width=width)
+        self._wl_map.SetWindow(self._window_settings.width)
+        self._wl_map.SetLevel(self._window_settings.level)
 
         extent = image_data.GetExtent()
         axis = PLANE_AXES_INDEX[self._plane]
