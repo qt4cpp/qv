@@ -3,6 +3,7 @@ from __future__ import annotations
 from PySide6 import QtCore, QtWidgets
 
 from qv.app.app_settings_manager import AppSettingsManager
+from qv.utils.log_util import logger
 from qv.viewers.mpr_viewer import MprViewer
 from qv.viewers.volume_viewer import VolumeViewer
 
@@ -36,7 +37,7 @@ class MultiViewerPanel(QtWidgets.QWidget):
         layout.addWidget(self.splitter)
 
         self.volume_viewer.dataLoaded.connect(self._on_volume_data_loaded)
-        self.volume_viewer.windowSettingsChanged.connect(self.mpr_viewer.set_window_settings)
+        # self.volume_viewer.windowSettingsChanged.connect(self.mpr_viewer.set_window_settings)
 
     def add_viewer(self, viewer: QtWidgets.QWidget, name: str) -> None:
         """
@@ -52,6 +53,7 @@ class MultiViewerPanel(QtWidgets.QWidget):
 
     def _on_volume_data_loaded(self) -> None:
         """Push loaded vtkImageData to MPR viewer"""
+        logger.info("[MultiViewerPanel] Volume data load.")
         image = self.volume_viewer.source_image
         if image is None:
             return

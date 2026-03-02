@@ -15,6 +15,7 @@ from qv.app.status import STATUS_FIELDS, StatusField
 from qv.app.shortcut_manager import ShortcutManager
 from qv.viewers.volume_viewer import VolumeViewer
 from qv.ui.widgets.histgram_widget import HistogramWidget
+from qv.ui.widgets.multi_viewer_panel import MultiViewerPanel
 import qv.utils.vtk_helpers as vtk_helpers
 import copy
 
@@ -68,15 +69,19 @@ class MainWindow(QMainWindow):
         # Create splietter for viewer and histgram
         splitter = QSplitter(QtCore.Qt.Vertical)
 
-        self.volume_viewer = VolumeViewer(
-            settings_manager=self.setting,
+        self.multi_viewer_panel = MultiViewerPanel(
+            settings_mgr=self.setting,
             parent=central_widget,
         )
+
+        # Keep compatibility with existing MainWindow code paths.
+        self.volume_viewer = self.multi_viewer_panel.volume_viewer
+        self.mpr_viewer = self.multi_viewer_panel.mpr_viewer
 
         self.histgram_widget = HistogramWidget()
         self.histgram_widget.setMinimumHeight(100)
 
-        splitter.addWidget(self.volume_viewer)
+        splitter.addWidget(self.multi_viewer_panel)
         splitter.addWidget(self.histgram_widget)
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 1)

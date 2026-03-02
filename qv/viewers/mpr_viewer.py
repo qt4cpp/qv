@@ -71,6 +71,12 @@ class MprViewer(BaseViewer):
         self._reslice.SetOutputDimensionality(2)
         self._reslice.SetInterpolationModeToLinear()
 
+        # prevent "Input port 0 of algorithm vtkImageReslice"
+        dummy = vtk.vtkImageData()
+        dummy.SetDimensions(1, 1, 1)
+        dummy.AllocateScalars(vtk.VTK_UNSIGNED_CHAR, 1)
+        self._reslice.SetInputData(dummy)
+
         self._color_map = vtk.vtkWindowLevelLookupTable()
         self._color_map.SetWindow(self._window_settings.width)
         self._color_map.SetLevel(self._window_settings.level)
@@ -85,7 +91,6 @@ class MprViewer(BaseViewer):
 
         self.renderer.AddActor(self._image_actor)
         self.renderer.ResetCamera()
-        self.update_view()
 
     def setup_interactor_style(self) -> None:
         """Use image interactor style (observer wiring will be added later)."""
@@ -103,6 +108,7 @@ class MprViewer(BaseViewer):
 
         self._image_data = image_data
         self._reslice.SetInputData(image_data)
+        logger.info("MPR image data loaded")
 
         extent = image_data.GetExtent()
         axis = PLANE_AXES_INDEX[self._plane]
@@ -119,6 +125,8 @@ class MprViewer(BaseViewer):
         """Update the reslice parameters."""
         if self._reslice is None:
             return
+
+        self._reslice.SetResliceAxesDirectionCosines(*PLANE_AXES[self._plane])
 
         extent = self._image_data.GetExtent()
         spacing = self._image_data.GetSpacing()
