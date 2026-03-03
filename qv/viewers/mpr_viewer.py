@@ -240,3 +240,38 @@ class MprViewer(BaseViewer):
 
         self.renderer.ResetCamera()
         self.renderer.ResetCameraClippingRange()
+
+    def set_slice_index(self, index: int) -> None:
+        """Set the current slice index for the active plane and refresh the view.
+
+        The inpt index is clamped to the valid range: [_slice_min, _slice_max].
+        """
+        if self._image_data is None:
+            logger.debug("set_slice_index ignored because imag is not loaded.")
+            return
+
+        clamped_index = max(self._slice_min, min(int(index), self._slice_max))
+
+        if clamped_index == self._slice_index:
+            return
+
+        self._slice_index = clamped_index
+        self._update_reslice()
+        self.update_view()
+        self.sliceChanged.emit(self._plane, self._slice_index)
+
+    def scroll_slice(self, delta: int) -> None:
+        """Move slice index by a relative amount (e.g. +1, -1). """
+        if self._image_data is None:
+            logger.debug("scroll_slice ignored because imag is not loaded.")
+            return
+
+        self.set_slice_index(self._slice_index + int(delta))
+
+    def get_slice_count(self) -> int:
+        """Return the number of slices in the current plane."""
+        if self._image_data is None:
+            return 0
+
+        # extent は両端を含むため、枚数は(max - min + 1)
+        return self._slice_max - self._slice_min + 1
