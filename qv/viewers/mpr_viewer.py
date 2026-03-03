@@ -28,21 +28,21 @@ PLANE_AXES: dict[MprPlane, tuple[float, float, float, float, float, float, float
         0.0,
         0.0,
         0.0,
-        1.0,
+        -1.0,
         0.0,
         0.0,
-        0.0,
-        1.0,
-    ),
-    MprPlane.CORONAL: (
-        1.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        1.0,
         0.0,
         -1.0,
+    ),
+    MprPlane.CORONAL: (
+        -1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        1.0,
         0.0,
     ),
     MprPlane.SAGITTAL: (
@@ -234,7 +234,9 @@ class MprViewer(BaseViewer):
         camera.SetParallelProjection(True)
         camera.SetFocalPoint(cx, cy, cz)
         camera.SetPosition(cx, cy, cz + dist)
-        camera.SetViewUp(0.0, 1.0, 0.0)
+        # Keep camera direction on +Z (stable), and flip vertical orientation only.
+        camera.SetViewUp(0.0, -1.0, 0.0)
+        camera.OrthogonalizeViewUp()
 
         self.renderer.ResetCamera()
         self.renderer.ResetCameraClippingRange()
