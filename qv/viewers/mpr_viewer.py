@@ -113,9 +113,19 @@ class MprViewer(BaseViewer):
         self.renderer.ResetCamera()
 
     def setup_interactor_style(self) -> None:
-        """Use image interactor style (observer wiring will be added later)."""
+        """Use image interactor style and bindd mouse-wheel slice navigation."""
         self._interactor_style = vtk.vtkInteractorStyleImage()
         self.interactor.SetInteractorStyle(self._interactor_style)
+
+        # マウスホイールによるスライス移動
+        self._interactor_style.AddObserver(
+            "MouseWheelForwardEvent",
+            self._on_mouse_wheel_forward,
+        )
+        self._interactor_style.AddObserver(
+            "MouseWheelBackwardEvent",
+            self._on_mouse_wheel_backward,
+        )
 
     def load_data(self, image_data: vtk.vtkImageData) -> None:
         """BaseViewer abstract method implementation."""
@@ -275,3 +285,11 @@ class MprViewer(BaseViewer):
 
         # extent は両端を含むため、枚数は(max - min + 1)
         return self._slice_max - self._slice_min + 1
+
+    def _on_mouse_wheel_forward(self, obj, event) -> None:
+        """Handle mouse wheel forward event."""
+        self.scroll_slice(+1)
+
+    def _on_mouse_wheel_backward(self, obj, event) -> None:
+        """Handle mouse wheel backward event."""
+        self.scroll_slice(-1)
