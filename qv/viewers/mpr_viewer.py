@@ -84,6 +84,9 @@ class MprViewer(BaseViewer):
 
         self._image_actor: vtk.vtkImageActor | None = None
         self._interactor_style: vtk.vtkInteractorStyleImage | None = None
+        self._ww_wl_dragging: bool = False
+        self._ww_wl_last_pos: tuple[int, int] | None = None
+        self._ww_wl_delta_per_pixel: float = 1.0
 
         super().__init__(settings_manager, parent)
         self._setup_pipeline()
@@ -125,6 +128,18 @@ class MprViewer(BaseViewer):
         self._interactor_style.AddObserver(
             "MouseWheelBackwardEvent",
             self._on_mouse_wheel_backward,
+        )
+        self._interactor_style.AddObserver(
+            "RightButtonPressEvent",
+            self._on_right_button_press,
+        )
+        self._interactor_style.AddObserver(
+            "RightButtonReleaseEvent",
+            self._on_right_button_release,
+        )
+        self._interactor_style.AddObserver(
+            "MouseMoveEvent",
+            self._on_mouse_move,
         )
 
     def load_data(self, image_data: vtk.vtkImageData) -> None:
@@ -293,3 +308,56 @@ class MprViewer(BaseViewer):
     def _on_mouse_wheel_backward(self, obj, event) -> None:
         """Handle mouse wheel backward event."""
         self.scroll_slice(-1)
+
+    def set_window_settings(self, settings: WindowSettings) -> None:
+        """Set the window settings for the volume."""
+        if self._wl_map is None:
+            return
+
+        next_settings = settings
+        if self._image_data is not None:
+            next_settings = settings.clamp(self._image_data.GetScalarRange())
+
+        if next_settings == self._window_settings:
+            return
+
+        self._window_settings = next_settings
+        self._wl_map.SetWindow(self._window_settings.width)
+        self._wl_map.SetLevel(self._window_settings.level)
+        self._wl_map.Modified()
+        self.update_view()
+
+    def adjust_window_settings(self, dx: int, dy: int) -> None:
+        """Adjust window settings by drag delta (dx -> width, dy -> level)."""
+        if self._image_data is None:
+            return
+
+        adjusted = self._window_settings.adjust(
+            delta_width=dx * self._ww_wl_delta_per_pixel,
+            delta_level=dy * self._ww_wl_delta_per_pixel,
+            scalar_range=self._image_data.GetScalarRange(),
+        )
+        self.set_window_settings(adjusted)
+
+    def _on_right_button_press(self, obj, event) -> None:
+        if self._image_data is None:
+            return
+        self._ww_wl_dragging = True
+        self._ww_wl_last_pos = self.interactor.GetEventPosition()
+
+    def _on_right_button_release(self, obj, event) -> None:
+        self._ww_wl_dragging = False
+        self._ww_wl_last_pos = None
+
+    def _on_mouse_move(self, obj, event) -> None:
+        if not self._ww_wl_dragging or self._ww_wl_last_pos is None:
+            return
+
+        x, y = self.interactor.GetEventPosition()
+        lx, ly = self._ww_wl_last_pos
+        dx, dy = x - lx, y - ly
+        if dx == 0 and dy == 0:
+            return
+
+        self.adjust_window_settings(dx, dy)
+        self._ww_wl_last_pos = (x, y)
