@@ -423,6 +423,11 @@ class VolumeViewer(BaseViewer):
     def current_profile_name(self) -> str:
         return self._performance_profile.name
 
+    @property
+    def source_image(self) -> vtk.vtkImageData | None:
+        """Expose loaded source image for linked viewers (MPR ect.)."""
+        return self._source_image
+
     def _apply_profile(self, interactive: bool) -> None:
         """Apply profile values to mapper/property if volume is ready."""
         if self.volume is None or self.volume_property is None:

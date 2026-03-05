@@ -1,0 +1,68 @@
+WW/WL 右下常時表示 実装タスク（コミット単位）
+Task 1 — BaseViewerに共通HUD基盤を追加
+•
+コミットメッセージ: feat(viewer): add shared window overlay HUD in BaseViewer
+•
+対象ファイル: qv/viewers/base_viewer.py
+•
+内容: overlay_renderer 上に右下固定の vtkTextActor を初期化する共通処理を追加。表示更新メソッド（例: _set_window_overlay_text）と表示ON/OFFメソッドを追加。
+•
+完了条件: 任意ViewerでHUD文字列を更新すると右下に表示される。
+Task 2 — BaseViewerにWindow Settings共通インターフェイスを追加
+•
+コミットメッセージ: feat(viewer): define window settings interface in BaseViewer
+•
+対象ファイル: qv/viewers/base_viewer.py
+•
+内容: windowSettingsChanged、window_settings、set_window_settings() の共通IFを定義。実描画反映はサブクラス側フック（例: _apply_window_settings）へ委譲。
+•
+完了条件: BaseViewer経由でWW/WL更新時にHUD表示が更新される。
+Task 3 — VolumeViewerを共通IFへ移行
+•
+コミットメッセージ: refactor(volume): migrate window settings flow to BaseViewer interface
+•
+対象ファイル: qv/viewers/volume_viewer.py
+•
+内容: 既存のTransfer Function更新を維持したまま、WW/WL更新経路をBaseViewer共通IFに統合。右ドラッグ変更時のHUD更新を共通化。
+•
+完了条件: VR画面右下にWW/WLが常時表示され、右ドラッグでリアルタイム更新される。
+Task 4 — MprViewerを共通IFへ移行
+•
+コミットメッセージ: refactor(mpr): migrate window settings flow to BaseViewer interface
+•
+対象ファイル: qv/viewers/mpr_viewer.py
+•
+内容: 既存の右ドラッグWW/WL操作を残しつつ、適用・表示更新をBaseViewer共通IFへ統合。表示フォーマットをVRと統一。
+•
+完了条件: MPR画面右下にWW/WLが常時表示され、右ドラッグでリアルタイム更新される。
+Task 5 — ステータスバーWW/WL表示を撤去
+•
+コミットメッセージ: refactor(ui): remove WW/WL from status bar
+•
+対象ファイル: qv/ui/mainwindow.py, qv/app/status.py
+•
+内容: ステータスバーのwindow_level/window_width更新処理を削除。Histogram更新など必要なシグナル利用は維持。
+•
+完了条件: WW/WLは各Viewer右下のみで表示される。
+Task 6 — 最終調整と回帰確認
+•
+コミットメッセージ: test(viewer): verify persistent WW/WL HUD across viewers
+•
+対象ファイル: 必要に応じてテスト/軽微修正ファイル
+•
+内容: 右下固定表示、リサイズ追従、右ドラッグ追従、VR/MPR独立動作（未連動）を確認して不足を修正。
+•
+完了条件: VR/MPRともに常時表示・操作追従・独立動作が成立。
+依存順
+1.
+Task 1
+2.
+Task 2
+3.
+Task 3
+4.
+Task 4
+5.
+Task 5
+6.
+Task 6
