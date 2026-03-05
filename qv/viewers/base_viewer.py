@@ -58,8 +58,11 @@ class BaseViewer(QtWidgets.QWidget, metaclass=ABCQtMeta):
         """
         super().__init__(parent)
         self.setting = settings_manager or AppSettingsManager()
+
+        self._window_overlay_actor: vtk.vtkTextActor | None = None
         self._setup_ui()
         self._setup_vtk_rendering()
+        self._init_window_overlay()
 
         self.camera_controller = CameraController(
             self.renderer.GetActiveCamera(),
@@ -106,6 +109,48 @@ class BaseViewer(QtWidgets.QWidget, metaclass=ABCQtMeta):
         self.interactor = render_window.GetInteractor()
 
         logger.debug("VTK rendering components initialized.")
+
+    def _init_window_overlay(self) -> None:
+        """Create a shared bottom-right HUD text actor for window settings."""
+        actor = vtk.vtkTextActor()
+        actor.SetInput("")
+
+        text_prop = actor.GetTextProperty()
+        text_prop.SetFontFamilyToCourier()  # Stable width for compact numeric display
+        text_prop.SetFontSize(18)
+        text_prop.SetColor(1.0, 1.0, 1.0)
+        text_prop.SetBold(False)
+        text_prop.SetItalic(False)
+        text_prop.SetShadow(True)
+
+        # Anchor text to bottom-right and keep it there on resize.
+        text_prop.SetJustificationToRight()
+        text_prop.SetVerticalJustificationToBottom()
+        actor.GetPositionCoordinate().SetCoordinateSystemToNormalizedViewport()
+        actor.SetPosition(0.95, 0.05)
+
+        actor.VisibilityOff()
+        self.overlay_renderer.AddActor(actor)
+        self._window_overlay_actor = actor
+
+    def _set_window_overlay(self, text: str) -> None:
+        """
+        Update HUD text content.
+
+        Empty text hides the HUD.
+        """
+        if self._window_overlay_actor is None:
+            return
+
+        safe_text = text.strip()
+        self._window_overlay_actor.SetInput(safe_text)
+        self._window_overlay_actor.SetVisibility(1 if safe_text else 0)
+
+    def _show_window_overlay(self, visible: bool) -> None:
+        """Explicitly show or hide the HUD."""
+        if self._window_overlay_actor is None:
+            return
+        self._window_overlay_actor.SetVisibility(1 if visible else 0)
 
     @abstractmethod
     def setup_interactor_style(self) -> None:
