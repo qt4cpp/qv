@@ -80,7 +80,6 @@ class MprViewer(BaseViewer):
 
         self._reslice: vtk.vtkImageReslice | None = None
         self._wl_map: vtk.vtkImageMapToWindowLevelColors | None = None
-        self._window_settings: WindowSettings = WindowSettings(level=300.0, width=30.0)
 
         self._image_actor: vtk.vtkImageActor | None = None
         self._interactor_style: vtk.vtkInteractorStyleImage | None = None
@@ -106,8 +105,6 @@ class MprViewer(BaseViewer):
 
         self._wl_map = vtk.vtkImageMapToWindowLevelColors()
         self._wl_map.SetInputConnection(self._reslice.GetOutputPort())
-        self._wl_map.SetWindow(self._window_settings.width)
-        self._wl_map.SetLevel(self._window_settings.level)
 
         self._image_actor = vtk.vtkImageActor()
         self._image_actor.GetMapper().SetInputConnection(self._wl_map.GetOutputPort())
@@ -146,6 +143,36 @@ class MprViewer(BaseViewer):
         """BaseViewer abstract method implementation."""
         self.set_image_data(image_data)
 
+    def _apply_window_settings(self, setting: WindowSettings) -> bool:
+        if self._wl_map is None:
+            return False
+
+        self._wl_map.SetWindow(setting.width)
+        self._wl_map.SetLevel(setting.level)
+        self._wl_map.Modified()
+        logger.debug("WL/WW map applied: %.1f, %.1f",
+                     self._wl_map.GetLevel(), self._wl_map.GetWindow())
+        return True
+
+    def set_window_settings(
+            self,
+            settings: WindowSettings,
+            *,
+            emit_signal: bool = True,
+            render: bool = True,
+    ) -> None:
+        """Clamp if needed, then delegate state/HUD/signal handling to BaseViewer."""
+
+        next_settings = settings
+        if self._image_data is not None:
+            next_settings = settings.clamp(self._image_data.GetScalarRange())
+
+        super().set_window_settings(
+            next_settings,
+            emit_signal=emit_signal,
+            render=render,
+        )
+
     def set_image_data(self, image_data: vtk.vtkImageData) -> None:
         """Set the image data."""
         if self._reslice is None or self._wl_map is None:
@@ -156,11 +183,12 @@ class MprViewer(BaseViewer):
         logger.info("MPR image data loaded")
 
         smin, smax = image_data.GetScalarRange()
-        width = max(1.0, min(float(smax - smin), 1024.0))
+        width = max(1.0, min(float(smax - smin), 300))
         level = (float(smin) + float(smax)) / 2.0
-        self._window_settings = WindowSettings(level=level, width=width)
-        self._wl_map.SetWindow(self._window_settings.width)
-        self._wl_map.SetLevel(self._window_settings.level)
+        self.set_window_settings(WindowSettings(level=level, width=width),
+                                 emit_signal=False,
+                                  render=False,
+                                 )
 
         self._recompute_slice_range()
         self._slice_index = (self._slice_min + self._slice_max) // 2
@@ -309,27 +337,12 @@ class MprViewer(BaseViewer):
         """Handle mouse wheel backward event."""
         self.scroll_slice(-1)
 
-    def set_window_settings(self, settings: WindowSettings) -> None:
-        """Set the window settings for the volume."""
-        if self._wl_map is None:
-            return
-
-        next_settings = settings
-        if self._image_data is not None:
-            next_settings = settings.clamp(self._image_data.GetScalarRange())
-
-        if next_settings == self._window_settings:
-            return
-
-        self._window_settings = next_settings
-        self._wl_map.SetWindow(self._window_settings.width)
-        self._wl_map.SetLevel(self._window_settings.level)
-        self._wl_map.Modified()
-        self.update_view()
-
     def adjust_window_settings(self, dx: int, dy: int) -> None:
         """Adjust window settings by drag delta (dx -> width, dy -> level)."""
         if self._image_data is None:
+            return
+
+        if self._window_settings is None:
             return
 
         adjusted = self._window_settings.adjust(

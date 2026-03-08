@@ -9,7 +9,6 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QSplitter,
 from qv.app.app_settings_manager import AppSettingsManager
 from qv.utils.resource_paths import settings_dir
 from qv.viewers.camera.camera_state import CameraAngle
-from qv.core.window_settings import WindowSettings
 from qv.utils.log_util import log_io
 from qv.app.status import STATUS_FIELDS, StatusField
 from qv.app.shortcut_manager import ShortcutManager
@@ -308,11 +307,8 @@ class MainWindow(QMainWindow):
         self._update_status("azimuth", angle.azimuth)
         self._update_status("elevation", angle.elevation)
 
-    def _on_window_settings_changed(self, window_settings: WindowSettings) -> None:
+    def _on_window_settings_changed(self, _window_settings: object) -> None:
         """Handle window level/width change."""
-        self._update_status("window_level", window_settings.level)
-        self._update_status("window_width", window_settings.width)
-
         if self.volume_viewer.opacity_func:
             self.histgram_widget.update_opacity_curve(self.volume_viewer.opacity_func)
 

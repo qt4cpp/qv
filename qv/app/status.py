@@ -60,8 +60,6 @@ def format_elevation(elevation: float) -> str:
 # If you want to add a new value, add field and then,
 # you should add property and setter for the field in VolumeViewer class.
 STATUS_FIELDS = {
-    "window_level": StatusField(label="WL", fmt="WL {:4.0f}"),
-    "window_width": StatusField(label="WW", fmt="WW {:4.0f}"),
     "delta_per_pixel": StatusField(label="dp/px", fmt="{}", visible=False),
     "azimuth": StatusField(label="Azimuth", formatter=format_azimuth),
     "elevation": StatusField(label="Elevation", formatter=format_elevation),

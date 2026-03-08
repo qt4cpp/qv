@@ -43,8 +43,6 @@ class VolumeViewer(BaseViewer):
     - Zoom operations specific to volume bounds
     """
 
-    windowSettingsChanged = QtCore.Signal(object)  # window, level
-
     def __init__(self,
                  settings_manager: AppSettingsManager | None = None,
                  parent=None) -> None:
@@ -65,8 +63,7 @@ class VolumeViewer(BaseViewer):
         self.mask_image: vtk.vtkImageData | None = None
 
         # Window/level attributes
-        self._window_settings = WindowSettings(level=0.0, width=1.0)
-        self.delta_per_pixel: float = 1
+        self.delta_per_pixel: float = 1.0
 
         # -- Undo/Redo + non-destructive clipping state --
         # Keep on immutable state and a pure-Python history stack
@@ -309,7 +306,7 @@ class VolumeViewer(BaseViewer):
         scalar_width = max(1.0, float(max_scalar - min_scalar))
         level = round((min_scalar + max_scalar) / 2.0)
         width = round(max(1.0, min(scalar_width, 1024.0)))
-        self._window_settings = WindowSettings(level=level, width=width)
+        initial_window_settings = WindowSettings(level=level, width=width)
 
         self.color_func = vtk.vtkColorTransferFunction()
         self.opacity_func = vtk.vtkPiecewiseFunction()
@@ -386,7 +383,8 @@ class VolumeViewer(BaseViewer):
         self.camera_controller.reset_to_bounds(self.volume.GetBounds(), view='front')
         self._set_camera_parallel_from_current()
 
-        self.update_transfer_functions()
+        self.set_window_settings(initial_window_settings, render=False)
+
         self.update_view()
         self._log_opengl_info_once()
         self.vtk_widget.GetRenderWindow().AddObserver("EndEvent", self._on_render_end)
@@ -396,7 +394,6 @@ class VolumeViewer(BaseViewer):
         self.set_clipping_state(ClippingState.default())
 
         self.dataLoaded.emit()
-        self.windowSettingsChanged.emit(self._window_settings)
 
         logger.info(
             "Volume loaded: extent=%s spacing=%s origin=%s",
@@ -575,12 +572,21 @@ class VolumeViewer(BaseViewer):
     # Transfer Function (Window Settings)
     # =====================================================
 
-    def update_transfer_functions(self) -> None:
-        """Update color and opacity transfer functions based on window settings."""
-        if self.color_func is None or self.opacity_func is None:
-            return
+    def _apply_window_settings(self, settings: WindowSettings) -> bool:
+        """
+        Apply clamped WW/WL to transfer functions.
 
-        min_val, max_val = self._window_settings.get_range()
+        This method is called by BaseViewer.set_window_settings().
+        Return True when a redraw is required.
+        """
+        if self.scalar_range is None:
+            logger.warning("Cannot apply window settings: volume not loaded.")
+            return False
+
+        if self.color_func is None or self.opacity_func is None:
+            return False
+
+        min_val, max_val = settings.get_range()
 
         self.color_func.RemoveAllPoints()
         self.color_func.AddRGBPoint(CLIPPED_SCALAR, 0.0, 0.0, 0.0)
@@ -592,8 +598,44 @@ class VolumeViewer(BaseViewer):
         self.opacity_func.AddPoint(min_val, 0.0)
         self.opacity_func.AddPoint(max_val, 1.0)
 
-        self.update_view()
-        self.windowSettingsChanged.emit(self._window_settings)
+        return True
+
+    def update_transfer_functions(self) -> None:
+        """
+        Re-apply current WW/WL to transfer functions and redraw.
+
+        Keep this method as a compatibility wrapper.
+        """
+        settings = self.window_settings
+        if settings is None:
+            return
+
+        changed = self._apply_window_settings(settings)
+        if changed:
+            self.update_view()
+
+    def set_window_settings(
+            self,
+            window_settings: WindowSettings,
+            *,
+            emit_signal: bool = True,
+            render: bool = True,
+    ) -> None:
+        """
+        Set WW/WL for VolumeViewer via BaseViewer shared interface.
+
+        - clamp to scalara range.
+        - Deletegate store/HUD/signal/render control to BaseViewer
+        """
+        if self.scalar_range is None:
+            logger.warning("Cannot set window settings: volume not loaded.")
+            return
+
+        clamped = window_settings.clamp(self.scalar_range)
+        if clamped == self._window_settings:
+            return
+
+        super().set_window_settings(clamped, emit_signal=emit_signal, render=render)
 
     def adjust_window_settings(self, dx:int, dy:int) -> None:
         """
@@ -605,43 +647,19 @@ class VolumeViewer(BaseViewer):
         if self.scalar_range is None:
             return
 
+        current = self.window_settings
+        if current is None:
+            return
+
         delta_width = dx * self.delta_per_pixel
         delta_level = -dy * self.delta_per_pixel
 
-        adjusted = self._window_settings.adjust(
+        adjusted = current.adjust(
             delta_width=delta_width,
             delta_level=delta_level,
             scalar_range=self.scalar_range,
         )
-
-        if adjusted != self._window_settings:
-            self._window_settings = adjusted
-            self.update_transfer_functions()
-
-    def set_window_settings(self, window_settings: WindowSettings) -> None:
-        """
-        Set the window settings for the volume.
-
-        """
-        if self.scalar_range is None:
-            logger.warning("Cannot set window settings: volume not loaded")
-            return
-
-        clamped = window_settings.clamp(self.scalar_range)
-
-        if clamped != self._window_settings:
-            self._window_settings = clamped
-            self.update_transfer_functions()
-
-    @property
-    def window_settings(self) -> WindowSettings:
-        """Get current window settings."""
-        return self._window_settings
-
-    @window_settings.setter
-    def window_settings(self, value: WindowSettings) -> None:
-        """Set the window settings."""
-        self.set_window_settings(value)
+        self.set_window_settings(adjusted)
 
     # =====================================================
     # Zoom Operations (Volume-specific)
