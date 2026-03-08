@@ -29,8 +29,6 @@ class WindowSettings:
         if self.width < self.MIN_WIDTH:
             raise ValueError(f"Window width must be >= 1.0, got {self.width}.")
 
-
-
     def __str__(self) -> str:
         """Return a string representation of the window settings."""
         return f"Level: {self.level:.0f}, Width: {self.width:.0f}"
