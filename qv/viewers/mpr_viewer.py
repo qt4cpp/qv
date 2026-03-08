@@ -90,8 +90,6 @@ class MprViewer(BaseViewer):
         super().__init__(settings_manager, parent)
         self._setup_pipeline()
 
-        logger.debug("Initializing MPR viewer with window settings: %s", self._window_settings)
-
     def _setup_pipeline(self) -> None:
         """Build VTK image pipeline for MPR viewer."""
         self._reslice = vtk.vtkImageReslice()
@@ -185,9 +183,12 @@ class MprViewer(BaseViewer):
         logger.info("MPR image data loaded")
 
         smin, smax = image_data.GetScalarRange()
-        width = max(1.0, min(float(smax - smin), 1024.0))
+        width = max(1.0, min(float(smax - smin), 300))
         level = (float(smin) + float(smax)) / 2.0
-        self.set_window_settings(WindowSettings(level=level, width=width))
+        self.set_window_settings(WindowSettings(level=level, width=width),
+                                 emit_signal=False,
+                                  render=False,
+                                 )
 
         self._recompute_slice_range()
         self._slice_index = (self._slice_min + self._slice_max) // 2
