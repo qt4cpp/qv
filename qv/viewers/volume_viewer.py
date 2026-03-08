@@ -43,8 +43,6 @@ class VolumeViewer(BaseViewer):
     - Zoom operations specific to volume bounds
     """
 
-    windowSettingsChanged = QtCore.Signal(object)  # window, level
-
     def __init__(self,
                  settings_manager: AppSettingsManager | None = None,
                  parent=None) -> None:
@@ -609,7 +607,7 @@ class VolumeViewer(BaseViewer):
         Keep this method as a compatibility wrapper.
         """
         settings = self.window_settings
-        if settings is Noen:
+        if settings is None:
             return
 
         changed = self._apply_window_settings(settings)
@@ -649,13 +647,14 @@ class VolumeViewer(BaseViewer):
         if self.scalar_range is None:
             return
 
-        if current := self.window_settings is None:
+        current = self.window_settings
+        if current is None:
             return
 
         delta_width = dx * self.delta_per_pixel
         delta_level = -dy * self.delta_per_pixel
 
-        adjusted = self._window_settings.adjust(
+        adjusted = current.adjust(
             delta_width=delta_width,
             delta_level=delta_level,
             scalar_range=self.scalar_range,

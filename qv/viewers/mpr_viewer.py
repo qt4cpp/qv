@@ -80,7 +80,6 @@ class MprViewer(BaseViewer):
 
         self._reslice: vtk.vtkImageReslice | None = None
         self._wl_map: vtk.vtkImageMapToWindowLevelColors | None = None
-        self._window_settings: WindowSettings | None = None
 
         self._image_actor: vtk.vtkImageActor | None = None
         self._interactor_style: vtk.vtkInteractorStyleImage | None = None
