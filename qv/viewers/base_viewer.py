@@ -126,7 +126,7 @@ class BaseViewer(QtWidgets.QWidget, metaclass=ABCQtMeta):
 
         text_prop = actor.GetTextProperty()
         text_prop.SetFontFamilyToCourier()  # Stable width for compact numeric display
-        text_prop.SetFontSize(18)
+        text_prop.SetFontSize(14)
         text_prop.SetColor(1.0, 1.0, 1.0)
         text_prop.SetBold(False)
         text_prop.SetItalic(False)
@@ -136,7 +136,7 @@ class BaseViewer(QtWidgets.QWidget, metaclass=ABCQtMeta):
 
         # Keep actor anchored to bottom-right on resize.
         actor.GetPositionCoordinate().SetCoordinateSystemToNormalizedViewport()
-        actor.SetPosition(0.95, 0.05)
+        actor.SetPosition(0.98, 0.01)
         actor.VisibilityOff()
 
         self.overlay_renderer.AddActor(actor)
@@ -169,7 +169,7 @@ class BaseViewer(QtWidgets.QWidget, metaclass=ABCQtMeta):
         """Convert window settings to HUD text format."""
         if settings is None:
             return ""
-        return f"WW {settings.width:.0f} WL {settings.level:.0f}"
+        return f"WL {settings.level:.0f} WW {settings.width:.0f}"
 
     def _sync_window_overlay_text(self) -> None:
         """Sync HUD text from current shared window settings."""
