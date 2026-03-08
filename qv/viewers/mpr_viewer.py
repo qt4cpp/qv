@@ -91,8 +91,6 @@ class MprViewer(BaseViewer):
         super().__init__(settings_manager, parent)
         self._setup_pipeline()
 
-        initial_window_settings = WindowSettings(level=30.0, width=300.0)
-        self.set_window_settings(initial_window_settings)
         logger.debug("Initializing MPR viewer with window settings: %s", self._window_settings)
 
     def _setup_pipeline(self) -> None:
@@ -110,9 +108,6 @@ class MprViewer(BaseViewer):
 
         self._wl_map = vtk.vtkImageMapToWindowLevelColors()
         self._wl_map.SetInputConnection(self._reslice.GetOutputPort())
-        initial_settings = self._window_settings or WindowSettings(level=30.0, width=300.0)
-        self._wl_map.SetWindow(initial_settings.width)
-        self._wl_map.SetLevel(initial_settings.level)
 
         self._image_actor = vtk.vtkImageActor()
         self._image_actor.GetMapper().SetInputConnection(self._wl_map.GetOutputPort())
@@ -150,6 +145,36 @@ class MprViewer(BaseViewer):
     def load_data(self, image_data: vtk.vtkImageData) -> None:
         """BaseViewer abstract method implementation."""
         self.set_image_data(image_data)
+
+    def _apply_window_settings(self, setting: WindowSettings) -> bool:
+        if self._wl_map is None:
+            return False
+
+        self._wl_map.SetWindow(setting.width)
+        self._wl_map.SetLevel(setting.level)
+        self._wl_map.Modified()
+        logger.debug("WL/WW map applied: %.1f, %.1f",
+                     self._wl_map.GetLevel(), self._wl_map.GetWindow())
+        return True
+
+    def set_window_settings(
+            self,
+            settings: WindowSettings,
+            *,
+            emit_signal: bool = True,
+            render: bool = True,
+    ) -> None:
+        """Clamp if needed, then delegate state/HUD/signal handling to BaseViewer."""
+
+        next_settings = settings
+        if self._image_data is not None:
+            next_settings = settings.clamp(self._image_data.GetScalarRange())
+
+        super().set_window_settings(
+            next_settings,
+            emit_signal=emit_signal,
+            render=render,
+        )
 
     def set_image_data(self, image_data: vtk.vtkImageData) -> None:
         """Set the image data."""
@@ -311,26 +336,6 @@ class MprViewer(BaseViewer):
     def _on_mouse_wheel_backward(self, obj, event) -> None:
         """Handle mouse wheel backward event."""
         self.scroll_slice(-1)
-
-    def set_window_settings(self, settings: WindowSettings) -> None:
-        """Set the window settings for the volume."""
-
-        next_settings = settings
-        if self._image_data is not None:
-            next_settings = settings.clamp(self._image_data.GetScalarRange())
-
-        if next_settings == self._window_settings:
-            return
-
-        self._window_settings = next_settings
-
-        if self._wl_map is None:
-            return
-
-        self._wl_map.SetWindow(self._window_settings.width)
-        self._wl_map.SetLevel(self._window_settings.level)
-        self._wl_map.Modified()
-        self.update_view()
 
     def adjust_window_settings(self, dx: int, dy: int) -> None:
         """Adjust window settings by drag delta (dx -> width, dy -> level)."""
