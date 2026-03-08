@@ -80,7 +80,7 @@ class MprViewer(BaseViewer):
 
         self._reslice: vtk.vtkImageReslice | None = None
         self._wl_map: vtk.vtkImageMapToWindowLevelColors | None = None
-        self._window_settings: WindowSettings = WindowSettings(level=300.0, width=30.0)
+        self._window_settings: WindowSettings | None = None
 
         self._image_actor: vtk.vtkImageActor | None = None
         self._interactor_style: vtk.vtkInteractorStyleImage | None = None
@@ -90,6 +90,10 @@ class MprViewer(BaseViewer):
 
         super().__init__(settings_manager, parent)
         self._setup_pipeline()
+
+        initial_window_settings = WindowSettings(level=30.0, width=300.0)
+        self.set_window_settings(initial_window_settings)
+        logger.debug("Initializing MPR viewer with window settings: %s", self._window_settings)
 
     def _setup_pipeline(self) -> None:
         """Build VTK image pipeline for MPR viewer."""
@@ -106,8 +110,9 @@ class MprViewer(BaseViewer):
 
         self._wl_map = vtk.vtkImageMapToWindowLevelColors()
         self._wl_map.SetInputConnection(self._reslice.GetOutputPort())
-        self._wl_map.SetWindow(self._window_settings.width)
-        self._wl_map.SetLevel(self._window_settings.level)
+        initial_settings = self._window_settings or WindowSettings(level=30.0, width=300.0)
+        self._wl_map.SetWindow(initial_settings.width)
+        self._wl_map.SetLevel(initial_settings.level)
 
         self._image_actor = vtk.vtkImageActor()
         self._image_actor.GetMapper().SetInputConnection(self._wl_map.GetOutputPort())
@@ -158,9 +163,7 @@ class MprViewer(BaseViewer):
         smin, smax = image_data.GetScalarRange()
         width = max(1.0, min(float(smax - smin), 1024.0))
         level = (float(smin) + float(smax)) / 2.0
-        self._window_settings = WindowSettings(level=level, width=width)
-        self._wl_map.SetWindow(self._window_settings.width)
-        self._wl_map.SetLevel(self._window_settings.level)
+        self.set_window_settings(WindowSettings(level=level, width=width))
 
         self._recompute_slice_range()
         self._slice_index = (self._slice_min + self._slice_max) // 2
@@ -311,8 +314,6 @@ class MprViewer(BaseViewer):
 
     def set_window_settings(self, settings: WindowSettings) -> None:
         """Set the window settings for the volume."""
-        if self._wl_map is None:
-            return
 
         next_settings = settings
         if self._image_data is not None:
@@ -322,6 +323,10 @@ class MprViewer(BaseViewer):
             return
 
         self._window_settings = next_settings
+
+        if self._wl_map is None:
+            return
+
         self._wl_map.SetWindow(self._window_settings.width)
         self._wl_map.SetLevel(self._window_settings.level)
         self._wl_map.Modified()
@@ -330,6 +335,9 @@ class MprViewer(BaseViewer):
     def adjust_window_settings(self, dx: int, dy: int) -> None:
         """Adjust window settings by drag delta (dx -> width, dy -> level)."""
         if self._image_data is None:
+            return
+
+        if self._window_settings is None:
             return
 
         adjusted = self._window_settings.adjust(

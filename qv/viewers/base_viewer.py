@@ -169,12 +169,12 @@ class BaseViewer(QtWidgets.QWidget, metaclass=ABCQtMeta):
         """Convert window settings to HUD text format."""
         if settings is None:
             return ""
-        return f"WW {settings.width:4d} WL {settings.level:4d}"
+        return f"WW {settings.width:.0f} WL {settings.level:.0f}"
 
     def _sync_window_overlay_text(self) -> None:
         """Sync HUD text from current shared window settings."""
         self._set_window_overlay_text(
-            self._format_window_overlay_text(self.setting.shared_window_settings)
+            self._format_window_overlay_text(self._window_settings)
         )
 
     def _apply_window_settings(self, settings: WindowSettings) -> bool:
