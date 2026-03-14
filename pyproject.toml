@@ -18,3 +18,8 @@ dependencies = [
     "setuptools==82.0.0",
     "vtk==9.6.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest-qt>=4.5.0",
+]

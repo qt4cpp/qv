@@ -7,21 +7,11 @@ import sys
 import numpy as np
 import pytest
 import vtk
-from PySide6 import QtWidgets
 from PySide6.QtCore import QSettings
 from vtkmodules.util.numpy_support import numpy_to_vtk
 
 from qv.app.app_settings_manager import AppSettingsManager
 from qv.viewers.mpr_viewer import MprViewer
-
-
-@pytest.fixture(scope="session")
-def qapp():
-    """Provide a single QApplication instance for Qt widget tests."""
-    app = QtWidgets.QApplication.instance()
-    if app is None:
-        app = QtWidgets.QApplication(sys.argv)
-    return app
 
 
 @pytest.fixture
@@ -31,6 +21,7 @@ def isolated_qsettings(tmp_path):
 
     This prevents viewer tests from reading or mutating the user's real settings.
     """
+    print(f"QSettings path: {tmp_path}")
     QSettings.setDefaultFormat(QSettings.IniFormat)
     QSettings.setPath(QSettings.IniFormat, QSettings.UserScope, str(tmp_path))
 
@@ -57,7 +48,7 @@ def sample_image_data():
     The scalar values are 0..59 so tests can assert the scalar range exactly.
     """
     dims = (4, 5, 3)
-    values = np.arange(dims[0] * dims[1] * dims[2], dtype=np.uint16)
+    values = np.arange(dims[0] * dims[1] * dims[2], dtype=np.int16)
 
     image = vtk.vtkImageData()
     image.SetDimensions(*dims)
@@ -72,14 +63,17 @@ def sample_image_data():
 
 
 @pytest.fixture
-def mpr_viewer(qapp, qtbot, settings_manager):
+def mpr_viewer(qtbot, settings_manager, monkeypatch):
     """
     Create and register an MprViewer widget for tests.
 
     qtbot manages widget lifetime and keeps the fixture aligned with pytest-qt.
     """
+    monkeypatch.setattr(
+        "qv.viewers.base_viewer.vtk.vtkRenderWindowInteractor.Initialize",
+        lambda self: None,
+    )
+
     viewer = MprViewer(settings_manager=settings_manager)
     qtbot.addWidget(viewer)
-    viewer.show()
-    yield viewer
-    viewer.close()
+    return viewer
