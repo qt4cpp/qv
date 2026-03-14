@@ -4,16 +4,26 @@ from __future__ import annotations
 
 import pytest
 
-# Real tests will be added when the dedicated interactor style is introduced.
-pytestmark = pytest.mark.skip(
-    reason="MprInteractorStyle is introduced in a later task."
-)
+from qv.core.window_settings import WindowSettings
+from qv.viewers.interactor_styles.mpr_interactor_style import MprInteractorStyle
 
 
 class ViewerSpy:
     """Minimal spy object reserved for future interactor-style tests."""
 
-    def __init__(self) -> None:
+    def __init__(
+            self,
+            *,
+            image_data_loaded: bool = True,
+            has_window_settings: bool = True,
+    ) -> None:
+        # The interactor style only needs truthy/non-truthy state here.
+        self.image_data = object() if image_data_loaded else None
+        self.window_settings = (
+            WindowSettings(level=40.0, width=80.0)
+            if has_window_settings
+            else None
+        )
         self.adjust_calls: list[tuple[int, int]] = []
         self.scroll_calls: list[int] = []
 
@@ -26,13 +36,141 @@ class ViewerSpy:
         self.scroll_calls.append(delta)
 
 
+class FakeInteractor:
+    """Simple interactor stub that returns a scripted sequence of positions."""
+
+    def __init__(self, positions: list[tuple[int, int]]) -> None:
+        self._positions = positions
+        self._index = 0
+
+    def GetEventPosition(self) -> tuple[int, int]:
+        """Return the next scripted cursor position."""
+        if not self._positions:
+            raise AssertionError("FakeInteractor requires at least one position.")
+
+        pos = self._positions[min(self._index, len(self._positions) - 1)]
+        self._index += 1
+        return pos
+
+
 @pytest.fixture
 def viewer_spy() -> ViewerSpy:
-    """Provide a fresh spy instance per test."""
-    return ViewerSpy()
+    """Provide a viewer spy that behaves like a loaded MPR viewer."""
+    return ViewerSpy(image_data_loaded=True, has_window_settings=True)
 
 
-def test_mpr_interactor_style_placeholder(viewer_spy: ViewerSpy) -> None:
-    """Keep the placeholder file green until the real task starts."""
-    assert viewer_spy.adjust_calls == []
-    assert viewer_spy.scroll_calls == []
+@pytest.fixture
+def unloaded_viewer() -> ViewerSpy:
+    """Provide a viewer spy that behaves like an unloaded MPR viewer."""
+    return ViewerSpy(image_data_loaded=False, has_window_settings=False)
+
+
+def test_right_button_press_starts_ww_wl_drag(
+        loaded_viewer: ViewerSpy,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Right-button press should enter WW/WL drag mode.
+
+    The style should capture the cursor position ao the next mouse-move event
+    can compute a delta.
+    """
+    style = MprInteractorStyle(loaded_viewer)
+    fake_interactor = FakeInteractor([(10, 20)])
+
+    monkeypatch.setattr(MprInteractorStyle, "GetInteractor", lambda self: fake_interactor)
+
+    style.on_right_button_down(None, None)
+
+    assert style._mode == "ww/wl"
+    assert style._last_pos == (10, 20)
+
+
+def test_mouse_move_adjusts_window_settings_only_during_active_drag(
+        loaded_viewer: ViewerSpy,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Mouse move should update WW/WL only while drag mode is active.
+
+    The style is expected to pass raw dx/dy through to the viewer and let the
+    viewer decide how those deltas map to width/level.
+    """
+    style = MprInteractorStyle(loaded_viewer)
+    fake_interactor = FakeInteractor([(100, 200), (112, 185)])
+
+    monkeypatch.setattr(MprInteractorStyle, "GetInteractor", lambda self: fake_interactor)
+    monkeypatch.setattr(MprInteractorStyle, "OnMouseMove", lambda self: None)
+
+    # No drag yet, so mouse move should be ignored.
+    style.on_mouse_move(None, None)
+    assert loaded_viewer.adjust_calls == []
+
+    style.on_right_button_down(None, None)
+    style.on_mouse_move(None, None)
+
+    assert loaded_viewer.adjust_calls == [(12, -15)]
+    assert style._last_pos == (112, 185)
+
+
+def test_mouse_wheel_scrolls_slice_forward_and_backward(
+        loaded_viewer: ViewerSpy,
+) -> None:
+    """Wheel events should be converted into relative slice movement."""
+    style = MprInteractorStyle(loaded_viewer)
+
+    style.on_mouse_wheel_forward(None, None)
+    style.on_mouse_wheel_backward(None, None)
+
+    assert loaded_viewer.scroll_calls == [+1, -1]
+
+
+def test_unloaded_viewers_ignores_drag_and_wheel_events(
+        unloaded_viewer: ViewerSpy,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Unloaded viewers should ignore all drag and wheel events.
+
+    This prevents the style from trying to perform WW/WL or slice navigation
+    when the viewer has no valid image state yet.
+    """
+    style = MprInteractorStyle(unloaded_viewer)
+    fake_interactor = FakeInteractor([(5, 6), (8, 9)])
+
+    monkeypatch.setattr(MprInteractorStyle, "GetInteractor", lambda self: fake_interactor)
+    monkeypatch.setattr(MprInteractorStyle, "OnMouseMove", lambda self: None)
+
+    style.on_right_button_down(None, None)
+    style.on_mouse_move(None, None)
+    style.on_mouse_wheel_forward(None, None)
+    style.on_mouse_wheel_backward(None, None)
+
+    assert unloaded_viewer.adjust_calls == []
+    assert unloaded_viewer.scroll_calls == []
+
+
+def test_right_button_release_finishes_drag_and_stops_followup_adjustments(
+        loaded_viewer: ViewerSpy,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Right-button release should end WW/WL drag mode.
+
+    After release, addtional mouse-move events must not keep adjusting the
+    window settings.
+    """
+    style = MprInteractorStyle(loaded_viewer)
+    fake_interactor = FakeInteractor([(20, 30), (25, 40), (40, 60)])
+
+    monkeypatch.setattr(MprInteractorStyle, "GetInteractor", lambda self: fake_interactor)
+    monkeypatch.setattr(MprInteractorStyle, "OnMouseMove", lambda self: None)
+
+    style.on_right_button_down(None, None)
+    style.on_mouse_move(None, None)
+    style.on_right_button_up(None, None)
+    style.on_mouse_move(None, None)
+
+    assert loaded_viewer.adjust_calls == [(5, 10)]
+    assert style._mode is None
+    assert style._last_pos is None
