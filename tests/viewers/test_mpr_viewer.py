@@ -114,12 +114,12 @@ def test_set_plane_recomputes_slice_range_and_resets_to_center(
     with qtbot.waitSignal(mpr_viewer.sliceChanged, timeout=1000) as blocker:
         mpr_viewer.set_plane(MprPlane.CORONAL)
 
-        plane, index = blocker.args
-        assert plane == MprPlane.CORONAL
-        assert index == 2
+    plane, index = blocker.args
+    assert plane == MprPlane.CORONAL
+    assert index == 2
 
-        # For dimensions (4, 5, 3), the coronal axis extent is 0..4.
-        assert mpr_viewer._slice_min == 0
-        assert mpr_viewer._slice_max == 4
-        assert mpr_viewer._slice_index == 2
-        assert mpr_viewer.get_slice_count() == 5
+    # For dimensions (4, 5, 3), the coronal axis extent is 0..4.
+    assert mpr_viewer._slice_min == 0
+    assert mpr_viewer._slice_max == 4
+    assert mpr_viewer._slice_index == 2
+    assert mpr_viewer.get_slice_count() == 5
