@@ -34,7 +34,7 @@ def test_set_image_data_initializes_window_settings_and_slice_state(
     - the axial slice range is derived from the image extent
     - the initial slice is centered
     """
-    with qtbot.waitSignal(mpr_viewer.image_data_loaded, timeout=1000):
+    with qtbot.waitSignal(mpr_viewer.dataLoaded, timeout=1000):
         mpr_viewer.set_image_data(sample_image_data)
 
     assert mpr_viewer._image_data is sample_image_data
@@ -89,8 +89,8 @@ def test_set_slice_index_emits_slice_changed_with_clamped_value(
     """
     mpr_viewer.set_image_data(sample_image_data)
 
-    with qtbot.waitSignal(mpr_viewer.slice_changed, timeout=1000) as blocker:
-        mpr_viewer.set_image_index(99)
+    with qtbot.waitSignal(mpr_viewer.sliceChanged, timeout=1000) as blocker:
+        mpr_viewer.set_slice_index(99)
 
     plane, index = blocker.args
     assert plane == MprPlane.AXIAL
@@ -111,7 +111,7 @@ def test_set_plane_recomputes_slice_range_and_resets_to_center(
     """
     mpr_viewer.set_image_data(sample_image_data)
 
-    with qtbot.waitSignal(mpr_viewer.slice_changed, timeout=1000) as blocker:
+    with qtbot.waitSignal(mpr_viewer.sliceChanged, timeout=1000) as blocker:
         mpr_viewer.set_plane(MprPlane.CORONAL)
 
         plane, index = blocker.args

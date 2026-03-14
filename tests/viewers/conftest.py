@@ -11,6 +11,7 @@ from PySide6.QtCore import QSettings
 from vtkmodules.util.numpy_support import numpy_to_vtk
 
 from qv.app.app_settings_manager import AppSettingsManager
+from qv.viewers.base_viewer import BaseViewer
 from qv.viewers.mpr_viewer import MprViewer
 
 
@@ -69,10 +70,7 @@ def mpr_viewer(qtbot, settings_manager, monkeypatch):
 
     qtbot manages widget lifetime and keeps the fixture aligned with pytest-qt.
     """
-    monkeypatch.setattr(
-        "qv.viewers.base_viewer.vtk.vtkRenderWindowInteractor.Initialize",
-        lambda self: None,
-    )
+    monkeypatch.setattr(BaseViewer, "_initialize_interactor", lambda self: None)
 
     viewer = MprViewer(settings_manager=settings_manager)
     qtbot.addWidget(viewer)
