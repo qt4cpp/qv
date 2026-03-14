@@ -54,7 +54,7 @@ class FakeInteractor:
 
 
 @pytest.fixture
-def viewer_spy() -> ViewerSpy:
+def loaded_viewer() -> ViewerSpy:
     """Provide a viewer spy that behaves like a loaded MPR viewer."""
     return ViewerSpy(image_data_loaded=True, has_window_settings=True)
 

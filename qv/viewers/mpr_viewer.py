@@ -8,6 +8,7 @@ from PySide6 import QtCore
 
 from qv.core.window_settings import WindowSettings
 from qv.viewers.base_viewer import BaseViewer
+from qv.viewers.interactor_styles.mpr_interactor_style import MprInteractorStyle
 
 logger = logging.getLogger(__name__)
 
@@ -83,8 +84,6 @@ class MprViewer(BaseViewer):
 
         self._image_actor: vtk.vtkImageActor | None = None
         self._interactor_style: vtk.vtkInteractorStyleImage | None = None
-        self._ww_wl_dragging: bool = False
-        self._ww_wl_last_pos: tuple[int, int] | None = None
         self._ww_wl_delta_per_pixel: float = 1.0
 
         super().__init__(settings_manager, parent)
@@ -114,30 +113,9 @@ class MprViewer(BaseViewer):
 
     def setup_interactor_style(self) -> None:
         """Use image interactor style and bindd mouse-wheel slice navigation."""
-        self._interactor_style = vtk.vtkInteractorStyleImage()
+        self._interactor_style = MprInteractorStyle(self)
         self.interactor.SetInteractorStyle(self._interactor_style)
 
-        # マウスホイールによるスライス移動
-        self._interactor_style.AddObserver(
-            "MouseWheelForwardEvent",
-            self._on_mouse_wheel_forward,
-        )
-        self._interactor_style.AddObserver(
-            "MouseWheelBackwardEvent",
-            self._on_mouse_wheel_backward,
-        )
-        self._interactor_style.AddObserver(
-            "RightButtonPressEvent",
-            self._on_right_button_press,
-        )
-        self._interactor_style.AddObserver(
-            "RightButtonReleaseEvent",
-            self._on_right_button_release,
-        )
-        self._interactor_style.AddObserver(
-            "MouseMoveEvent",
-            self._on_mouse_move,
-        )
 
     def load_data(self, image_data: vtk.vtkImageData) -> None:
         """BaseViewer abstract method implementation."""
@@ -329,14 +307,6 @@ class MprViewer(BaseViewer):
         # extent は両端を含むため、枚数は(max - min + 1)
         return self._slice_max - self._slice_min + 1
 
-    def _on_mouse_wheel_forward(self, obj, event) -> None:
-        """Handle mouse wheel forward event."""
-        self.scroll_slice(+1)
-
-    def _on_mouse_wheel_backward(self, obj, event) -> None:
-        """Handle mouse wheel backward event."""
-        self.scroll_slice(-1)
-
     def adjust_window_settings(self, dx: int, dy: int) -> None:
         """Adjust window settings by drag delta (dx -> width, dy -> level)."""
         if self._image_data is None:
@@ -351,26 +321,3 @@ class MprViewer(BaseViewer):
             scalar_range=self._image_data.GetScalarRange(),
         )
         self.set_window_settings(adjusted)
-
-    def _on_right_button_press(self, obj, event) -> None:
-        if self._image_data is None:
-            return
-        self._ww_wl_dragging = True
-        self._ww_wl_last_pos = self.interactor.GetEventPosition()
-
-    def _on_right_button_release(self, obj, event) -> None:
-        self._ww_wl_dragging = False
-        self._ww_wl_last_pos = None
-
-    def _on_mouse_move(self, obj, event) -> None:
-        if not self._ww_wl_dragging or self._ww_wl_last_pos is None:
-            return
-
-        x, y = self.interactor.GetEventPosition()
-        lx, ly = self._ww_wl_last_pos
-        dx, dy = x - lx, y - ly
-        if dx == 0 and dy == 0:
-            return
-
-        self.adjust_window_settings(dx, dy)
-        self._ww_wl_last_pos = (x, y)
