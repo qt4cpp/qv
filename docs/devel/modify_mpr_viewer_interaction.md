@@ -5,6 +5,8 @@
 `MprViewer` のインタラクションと `WindowSettings` の挙動を、`VolumeViewer` と整合する形に整理する。  
 この修正は別ブランチで行う前提とし、Task 6 では着手しない。
 
+テスト運用と手動確認手順は `docs/devel/mpr_viewer_testing.md` を参照する。
+
 ---
 
 ## 背景
