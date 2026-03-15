@@ -38,7 +38,7 @@ def test_set_image_data_initializes_window_settings_and_slice_state(
         mpr_viewer.set_image_data(sample_image_data)
 
     assert mpr_viewer._image_data is sample_image_data
-    assert mpr_viewer.window_settings == WindowSettings(level=29.5, width=59.0)
+    assert mpr_viewer.window_settings == WindowSettings(level=30.0, width=59.0)
 
     # For dimensions (4, 5, 3), the axial axis extent is 0..2.
     assert mpr_viewer._slice_min == 0
@@ -123,3 +123,4 @@ def test_set_plane_recomputes_slice_range_and_resets_to_center(
     assert mpr_viewer._slice_max == 4
     assert mpr_viewer._slice_index == 2
     assert mpr_viewer.get_slice_count() == 5
+

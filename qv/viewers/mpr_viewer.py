@@ -84,7 +84,7 @@ class MprViewer(BaseViewer):
 
         self._image_actor: vtk.vtkImageActor | None = None
         self._interactor_style: vtk.vtkInteractorStyleImage | None = None
-        self._ww_wl_delta_per_pixel: float = 1.0
+        self.delta_per_pixel: float = 1.0
 
         super().__init__(settings_manager, parent)
         self._setup_pipeline()
@@ -132,6 +132,28 @@ class MprViewer(BaseViewer):
                      self._wl_map.GetLevel(), self._wl_map.GetWindow())
         return True
 
+    @property
+    def image_data(self) -> vtk.vtkImageData | None:
+        """Expose loaded image  data for interactor-style checks."""
+        return self._image_data
+
+    def _get_scalar_range(self) -> tuple[float, float] | None:
+        """Return the current scalar range when image data is loaded."""
+        if self._image_data is None:
+            return None
+        return self._image_data.GetScalarRange()
+
+    def _build_initial_window_settings(
+            self,
+            scalar_range: tuple[float, float],
+    ) -> WindowSettings:
+        """Create initial WW/WL using the same policy as VolumeViewer."""
+        min_scalar, max_scalar = scalar_range
+        scalar_width = max(1.0, max_scalar - min_scalar)
+        level = round((min_scalar + max_scalar) / 2.0)
+        width = round(max(1.0, min(scalar_width, 1024.0)))
+        return WindowSettings(level=level, width=width)
+
     def set_window_settings(
             self,
             settings: WindowSettings,
@@ -139,17 +161,17 @@ class MprViewer(BaseViewer):
             emit_signal: bool = True,
             render: bool = True,
     ) -> None:
-        """Clamp if needed, then delegate state/HUD/signal handling to BaseViewer."""
+        """Set WW/WL via BaseViewer contract after clamping to loaded image data."""
+        scalar_range = self._get_scalar_range()
+        if scalar_range is None:
+            logger.warning("Cannot set window settings: image not loaded.")
+            return
 
-        next_settings = settings
-        if self._image_data is not None:
-            next_settings = settings.clamp(self._image_data.GetScalarRange())
+        clamped = settings.clamp(scalar_range)
+        if clamped == self._window_settings:
+            return
 
-        super().set_window_settings(
-            next_settings,
-            emit_signal=emit_signal,
-            render=render,
-        )
+        super().set_window_settings(clamped, emit_signal=emit_signal, render=render)
 
     def set_image_data(self, image_data: vtk.vtkImageData) -> None:
         """Set the image data."""
@@ -160,13 +182,11 @@ class MprViewer(BaseViewer):
         self._reslice.SetInputData(image_data)
         logger.info("MPR image data loaded")
 
-        smin, smax = image_data.GetScalarRange()
-        width = max(1.0, min(float(smax - smin), 300))
-        level = (float(smin) + float(smax)) / 2.0
-        self.set_window_settings(WindowSettings(level=level, width=width),
-                                 emit_signal=False,
-                                  render=False,
-                                 )
+        self.set_window_settings(
+            self._build_initial_window_settings(self._image_data.GetScalarRange()),
+            emit_signal=False,
+            render=False,
+        )
 
         self._recompute_slice_range()
         self._slice_index = (self._slice_min + self._slice_max) // 2
@@ -309,15 +329,17 @@ class MprViewer(BaseViewer):
 
     def adjust_window_settings(self, dx: int, dy: int) -> None:
         """Adjust window settings by drag delta (dx -> width, dy -> level)."""
-        if self._image_data is None:
+        scalar_range = self._get_scalar_range()
+        if scalar_range is None:
             return
 
-        if self._window_settings is None:
+        current = self.window_settings
+        if current is None:
             return
 
         adjusted = self._window_settings.adjust(
-            delta_width=dx * self._ww_wl_delta_per_pixel,
-            delta_level=dy * self._ww_wl_delta_per_pixel,
-            scalar_range=self._image_data.GetScalarRange(),
+            delta_width=dx * self.delta_per_pixel,
+            delta_level=-dy * self.delta_per_pixel,
+            scalar_range=scalar_range,
         )
         self.set_window_settings(adjusted)
