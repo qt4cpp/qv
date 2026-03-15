@@ -72,10 +72,20 @@ class BaseViewer(QtWidgets.QWidget, metaclass=ABCQtMeta):
 
         self.camera_controller = CameraController(
             self.renderer.GetActiveCamera(),
-            self.renderer)
+            self.renderer,
+        )
         self.camera_controller.add_angle_changed_callback(self._on_camera_angle_changed)
 
         self.setup_interactor_style()
+        self._initialize_interactor()
+
+    def _initialize_interactor(self) -> None:
+        """
+        Initialize the VTK interactor.
+
+        This is separated from __init__ so tests can monkeypatch only this
+        method and avoid fragile interactor startup in headless environments.
+        """
         self.interactor.Initialize()
 
     def _setup_ui(self) -> None:
