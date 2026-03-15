@@ -124,3 +124,20 @@ def test_set_plane_recomputes_slice_range_and_resets_to_center(
     assert mpr_viewer._slice_index == 2
     assert mpr_viewer.get_slice_count() == 5
 
+
+def test_set_image_data_shows_window_overlay_after_initial_load(
+        mpr_viewer,
+        sample_image_data,
+):
+    """
+    Initial load should the integration enable the shared WW/WL HUD
+
+    This protects the integration between BaseViewer's overlay state and the
+    MPR-specific initial window-setting setup.
+    """
+    mpr_viewer.set_image_data(sample_image_data)
+
+    actor = mpr_viewer._window_overlay_actor
+    assert actor is not None
+    assert actor.GetVisibility() == 1
+    assert actor.GetInput() == 'WL 30 WW 59'
