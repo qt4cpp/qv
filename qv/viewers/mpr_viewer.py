@@ -72,9 +72,22 @@ class MprViewer(BaseViewer):
 
     sliceChanged = QtCore.Signal(object, int)
 
-    def __init__(self, settings_manager=None, parent=None) -> None:
+    def __init__(
+            self,
+            settings_manager=None,
+            parent=None,
+            *,
+            plane: MprPlane = MprPlane.AXIAL,
+    ) -> None:
+        """
+        Initialize an MPR viewer bound to a fixed anatomical plane by default.
+
+        The plane can still be changed later via ``set_plane()``, but the
+        multi-panel layout uses this constructor argument to assign each viewer
+        its initial role explicitly.
+        """
         self._image_data: vtk.vtkImageData | None = None
-        self._plane: MprPlane = MprPlane.AXIAL
+        self._plane: MprPlane = plane
         self._slice_index: int = 0
         self._slice_min: int = 0
         self._slice_max: int = 0
@@ -88,6 +101,11 @@ class MprViewer(BaseViewer):
 
         super().__init__(settings_manager, parent)
         self._setup_pipeline()
+
+    @property
+    def plane(self) -> MprPlane:
+        """Return the currently assigned anatomical plane."""
+        return  self._plane
 
     def _setup_pipeline(self) -> None:
         """Build VTK image pipeline for MPR viewer."""
