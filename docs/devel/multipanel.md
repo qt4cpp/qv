@@ -87,7 +87,39 @@
 
 ---
 
-### 6.2 設計方針（重要）
+### 6.2 想定ディレクトリ構造
+
+追加・変更が想定されるファイル構成は以下とする。
+
+```text
+qv/
+├── ui/
+│   └── widgets/
+│       └── multi_viewer_panel.py
+└── viewers/
+    ├── mpr_viewer.py
+    ├── volume_viewer.py
+    ├── controllers/
+    │   ├── __init__.py
+    │   └── mpr_sync_controller.py
+    └── interactor_styles/
+        └── mpr_interactor_style.py
+
+tests/
+├── ui/
+│   └── test_multi_viewer_panel.py
+└── viewers/
+    ├── test_mpr_viewer.py
+    ├── test_mpr_interactor_style.py
+    └── test_mpr_sync_controller.py
+```
+
+> **補足:** `MprSyncController` は同期責務を閉じ込めるため、
+> `viewer` 本体ではなく `qv/viewers/controllers/` 配下に置く。
+
+---
+
+### 6.3 設計方針（重要）
 
 本システムは以下の設計原則に基づく：
 
@@ -98,7 +130,7 @@
 
 ---
 
-### 6.3 状態の分類
+### 6.4 状態の分類
 
 状態は以下の2種類に分かれる：
 
@@ -368,3 +400,136 @@ class SyncRequest:
 | image未設定 | early return |
 | bounds超過 | clamp |
 | ピッキング失敗 | 無視 |
+
+---
+
+## 11. 実装 Phase
+
+UI 上で段階的に動作確認しながら進めるため、
+**表示の成立 → UI 操作の成立 → 同期処理の追加** の順で実装する。
+
+### Phase 1: 4画面レイアウトを成立させる
+
+#### 目的
+
+- `VR / Axial / Coronal / Sagittal` の 4 viewer を同時表示できるようにする
+- データ読込後に 3 つの MPR viewer が同じ `vtkImageData` を共有できるようにする
+- まずは crosshair や同期なしで UI の骨格を確認できる状態にする
+
+#### 実装範囲
+
+- `MultiViewerPanel` を 4 画面構成に拡張する
+- `MprViewer` を 3 インスタンス生成し、それぞれ `Axial / Coronal / Sagittal` を固定で割り当てる
+- `VolumeViewer` の読込済み `vtkImageData` を各 MPR viewer に配布する
+- 各 viewer の初期サイズ、レイアウト崩れ、再描画の成立を確認する
+
+#### 確認項目
+
+- DICOM 読込後に 4 画面が同時表示される
+- Axial / Coronal / Sagittal がそれぞれ異なる断面として表示される
+- リサイズしてもレイアウトが破綻しない
+- 既存の VR 操作が壊れていない
+
+### Phase 2: 各 MPR viewer の独立操作を成立させる
+
+#### 目的
+
+- 同期を入れる前に、各 MPR viewer が単体で安定して操作できる状態にする
+- UI 上で「各断面の独立性」が確認できるようにする
+
+#### 実装範囲
+
+- 各 MPR viewer でホイールによる slice 移動を確認する
+- 必要に応じて viewer 名や plane 名など最小限の識別表示を追加する
+- 各 viewer の WW/WL やカメラ挙動が独立していることを確認する
+- MPR ごとの表示更新が他 viewer に副作用を持たないことを確認する
+
+#### 確認項目
+
+- Axial のホイール操作で Axial だけが動く
+- Coronal / Sagittal でも同様に独立して slice 移動できる
+- VR の WW/WL と MPR の WW/WL が連動しない
+- UI 操作中にクラッシュや著しい描画乱れがない
+
+### Phase 3: crosshair 表示だけを追加する
+
+#### 目的
+
+- slice 同期より先に crosshair overlay の見え方と更新タイミングを固める
+- 「他断面の現在位置を可視化する」という UI を先に確認する
+
+#### 実装範囲
+
+- 各 MPR viewer に crosshair overlay 描画を追加する
+- 他 viewer の現在 slice を参照して crosshair 位置を更新する
+- 自 viewer の slice 変更時に他 viewer の crosshair が更新されるようにする
+- この段階では他 viewer の slice 自体は動かさない
+
+#### 確認項目
+
+- Axial をスクロールすると Coronal / Sagittal の crosshair だけが追従する
+- Coronal, Sagittal でも同様に相互更新される
+- crosshair の向きと位置が設計どおりである
+- crosshair が表示更新だけで slice を誤って変更しない
+
+### Phase 4: ダブルクリック同期を追加する
+
+#### 目的
+
+- 最も分かりやすい同期操作として、ダブルクリックによる一点整列を先に成立させる
+- `display -> world -> 各 plane の slice` 変換の妥当性を UI で確認する
+
+#### 実装範囲
+
+- MPR viewer 上のダブルクリックで `WorldPosition` を取得する
+- `SyncRequest` を `MprSyncController` に渡す
+- controller が他 viewer の slice を該当位置へ更新する
+- 再帰更新を抑止する最低限のガードを入れる
+
+#### 確認項目
+
+- 任意の viewer をダブルクリックすると 3 断面が同一点に揃う
+- 揃った結果として crosshair も一致する
+- volume 外クリックやピッキング失敗時は安全に無視される
+- 操作後に sliceChanged のループが起きない
+
+### Phase 5: Shift ドラッグによる一時同期を追加する
+
+#### 目的
+
+- 連続操作時の追従感を確認しながら、同期 UI を完成させる
+- 負荷やちらつきの問題をこの段階で評価する
+
+#### 実装範囲
+
+- Shift + 左ドラッグで連続的に `WorldPosition` を送る
+- controller で他 viewer の slice を追従更新する
+- 高頻度イベントに対して throttle を導入する
+- ドラッグ終了後は最終位置を保持する
+
+#### 確認項目
+
+- Shift ドラッグ中に 3 viewer が同一点へ追従する
+- 通常ドラッグでは同期しない
+- 過剰な再描画や操作遅延が許容範囲に収まる
+- throttle によって最終位置が欠落しない
+
+### Phase 6: 仕上げと回帰確認
+
+#### 目的
+
+- UI 実装後に責務分離とテストを整理し、今後の拡張に耐える状態へ固める
+
+#### 実装範囲
+
+- `MprSyncController` の単体テストを追加する
+- `MultiViewerPanel` の UI テストを拡充する
+- 初期化、再読込、エラー時挙動、境界値の確認を行う
+- 必要であればログ出力や補助メソッドを整理する
+
+#### 確認項目
+
+- 新規読込後に 4 viewer が正しく再初期化される
+- 既存の MPR 単体テストが壊れていない
+- 追加した同期系テストが安定して通る
+- 実運用相当のデータで UI 応答性が許容範囲にある
