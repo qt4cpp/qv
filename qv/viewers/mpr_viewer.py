@@ -25,37 +25,19 @@ class MprPlane(enum.Enum):
 # (x_axis, y_axis, z_axis) as 3x3 row-major values.
 PLANE_AXES: dict[MprPlane, tuple[float, float, float, float, float, float, float, float, float]] = {
     MprPlane.AXIAL: (
-        1.0,
-        0.0,
-        0.0,
-        0.0,
-        -1.0,
-        0.0,
-        0.0,
-        0.0,
-        -1.0,
+        1.0, 0.0, 0.0,
+        0.0, -1.0, 0.0,
+        0.0, 0.0, -1.0,
     ),
     MprPlane.CORONAL: (
-        -1.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        1.0,
-        0.0,
-        1.0,
-        0.0,
+        -1.0, 0.0, 0.0,
+        0.0, 0.0, 1.0,
+        0.0, 1.0, 0.0,
     ),
     MprPlane.SAGITTAL: (
-        0.0,
-        1.0,
-        0.0,
-        0.0,
-        0.0,
-        1.0,
-        1.0,
-        0.0,
-        0.0,
+        0.0, 1.0, 0.0,
+        0.0, 0.0, 1.0,
+        1.0, 0.0, 0.0,
     ),
 }
 
@@ -82,9 +64,8 @@ class MprViewer(BaseViewer):
         """
         Initialize an MPR viewer bound to a fixed anatomical plane by default.
 
-        The plane can still be changed later via ``set_plane()``, but the
-        multi-panel layout uses this constructor argument to assign each viewer
-        its initial role explicitly.
+        In the 4-up layout each viewer keeps its own fixed plane, while the
+        legacy single-MPR layout can still switch planes through ``set_plane()``.
         """
         self._image_data: vtk.vtkImageData | None = None
         self._plane: MprPlane = plane
@@ -94,18 +75,75 @@ class MprViewer(BaseViewer):
 
         self._reslice: vtk.vtkImageReslice | None = None
         self._wl_map: vtk.vtkImageMapToWindowLevelColors | None = None
-
         self._image_actor: vtk.vtkImageActor | None = None
         self._interactor_style: vtk.vtkInteractorStyleImage | None = None
+
+        # A compact top-lefft ovaerlay makes it easy to identify each pane during
+        # Phase 2 validation without coupling the viewer to any Qt label widget.
+        self._plane_overlay_actor: vtk.vtkTextActor | None = None
+
         self.delta_per_pixel: float = 1.0
 
         super().__init__(settings_manager, parent)
+
+        self._init_plane_overlay()
         self._setup_pipeline()
+        self._sync_plane_overlay_text()
 
     @property
     def plane(self) -> MprPlane:
         """Return the currently assigned anatomical plane."""
         return  self._plane
+
+    @property
+    def plane_label(self) -> str:
+        """Return the label for the current plane."""
+        return self._plane.value.title()
+
+    @property
+    def slice_index(self) -> int:
+        """Return the current slice index."""
+        return self._slice_index
+
+    def _init_plane_overlay(self) -> None:
+        """Create a compact top-left overlay for the current plane."""
+        actor = vtk.vtkTextActor()
+        actor.SetInput("")
+
+        text_prop = actor.GetTextProperty()
+        text_prop.SetFontFamilyToCourier()
+        text_prop.SetFontSize(14)
+        text_prop.SetColor(0.95, 0.95, 0.30)
+        text_prop.SetBold(True)
+        text_prop.SetItalic(False)
+        text_prop.SetShadow(True)
+        text_prop.SetJustificationToLeft()
+        text_prop.SetVerticalJustificationToTop()
+
+        actor.GetPositionCoordinate().SetCoordinateSystemToNormalizedViewport()
+        actor.SetPosition(0.02, 0.98)
+
+        self.overlay_renderer.AddActor(actor)
+        self._plane_overlay_actor = actor
+
+    def _format_plane_overlay_text(self) -> str:
+        """
+        Build a stable viewer label for pahsae 2.
+
+        The plane name is always shown. Slice numbering is 1-based in the UI so
+        users can visually compare panes without thinking about zero-based.
+        """
+        if self.get_slice_count() <= 0:
+            return self.plane_label
+
+        visible_slice = self._slice_index - self._slice_min + 1
+        return f"{self.plane_label} Slice {visible_slice} / {self.get_slice_count()}"
+
+    def _sync_plane_overlay_text(self) -> None:
+        """Reresh the identification overlay after plane or slice changes."""
+        if self._plane_overlay_actor is None:
+            return
+        self._plane_overlay_actor.SetInput(self._format_plane_overlay_text())
 
     def _setup_pipeline(self) -> None:
         """Build VTK image pipeline for MPR viewer."""
@@ -192,13 +230,18 @@ class MprViewer(BaseViewer):
         super().set_window_settings(clamped, emit_signal=emit_signal, render=render)
 
     def set_image_data(self, image_data: vtk.vtkImageData) -> None:
-        """Set the image data."""
+        """
+        Set the shared vtkImageData and initialize this viewer's own slice state.
+
+        Each MPR viewer keeps its own slice position, camera, and WW/WL state
+        even when multiple viewers point at the same vtkImageData instance.
+        """
         if self._reslice is None or self._wl_map is None:
             return
 
         self._image_data = image_data
         self._reslice.SetInputData(image_data)
-        logger.info("MPR image data loaded")
+        logger.info("MPR image data loaded for %s", self._plane.value)
 
         self.set_window_settings(
             self._build_initial_window_settings(self._image_data.GetScalarRange()),
@@ -211,6 +254,7 @@ class MprViewer(BaseViewer):
 
         self._update_reslice()
         self._setup_camera(self._plane)
+        self._sync_plane_overlay_text()
         self.update_view()
         self.dataLoaded.emit()
 
@@ -227,26 +271,28 @@ class MprViewer(BaseViewer):
         self._slice_max = int(extent[2 * axis + 1])
 
     def set_plane(self, plane: MprPlane) -> None:
-        """Switch current MPR plane and reset slice to center."""
-        if self._image_data is None:
-            self._plane = plane
-            return
+        """
+        Switch current MPR plane and reset slice to the new center.
 
+        This path is mainly kept ffor single-MPR mode. In the 4-up layout each
+        viewer is expected to stay on its assigned plane.
+        """
         if self._plane == plane:
             return
-
         self._plane = plane
+
+        if self._image_data is None:
+            self._sync_plane_overlay_text()
+            return
+
         self._recompute_slice_range()
         self._slice_index = (self._slice_min + self._slice_max) // 2
 
         self._update_reslice()
-        out = self._reslice.GetOutput()
-        logger.debug("reslice output bounds: %s", out.GetBounds() if out else None)
-        logger.debug("reslice output extent: %s", out.GetExtent() if out else None)
-        logger.debug("image_actor bounds: %s", self._image_actor.GetBounds())
-
         self._setup_camera(self._plane)
+        self._sync_plane_overlay_text()
         self.update_view()
+
         logger.info("MPR plane switched to %s", plane)
         self.sliceChanged.emit(self._plane, self._slice_index)
 
@@ -270,7 +316,11 @@ class MprViewer(BaseViewer):
         axis = PLANE_AXES_INDEX[self._plane]
         world_origin[axis] = origin[axis] + self._slice_index * spacing[axis]
 
-        self._reslice.SetResliceAxesOrigin(world_origin[0], world_origin[1], world_origin[2])
+        self._reslice.SetResliceAxesOrigin(
+            world_origin[0],
+            world_origin[1],
+            world_origin[2],
+        )
         self._reslice.Modified()
         self._reslice.Update()
 
@@ -279,7 +329,9 @@ class MprViewer(BaseViewer):
             out = self._reslice.GetOutput()
             if out is not None:
                 we = out.GetExtent()
-                self._image_actor.SetDisplayExtent(we[0], we[1], we[2], we[3], we[4], we[5])
+                self._image_actor.SetDisplayExtent(
+                    we[0], we[1], we[2], we[3], we[4], we[5]
+                )
 
     def _setup_camera(self, plane: MprPlane) -> None:
         """Configure the camera for the given plane."""
@@ -327,6 +379,7 @@ class MprViewer(BaseViewer):
 
         self._slice_index = clamped_index
         self._update_reslice()
+        self._sync_plane_overlay_text()
         self.update_view()
         self.sliceChanged.emit(self._plane, self._slice_index)
 

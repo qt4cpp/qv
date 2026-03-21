@@ -135,7 +135,7 @@ class MainWindow(QMainWindow):
 
         # Single-mpr 用メニュー
         # SINGLE_MPR モードでのみ使用する
-        mpr_menu = view_menu.addMenu("MPR")
+        self._mpr_menu = view_menu.addMenu("MPR")
         self._mpr_plane_group = QActionGroup(self)
         self._mpr_plane_group.setExclusive(True)
         self._mpr_plane_actions: dict[str, QAction] = {}
@@ -152,9 +152,10 @@ class MainWindow(QMainWindow):
             )
             self._mpr_plane_group.addAction(action)
             self._mpr_plane_actions[plane] = action
-            mpr_menu.addAction(action)
+            self._mpr_menu.addAction(action)
 
         self._mpr_plane_actions[MprPlane.AXIAL].setChecked(True)
+        self._sync_mpr_menu_state()
 
         view_menu.addSeparator()
         perf_menu = view_menu.addMenu("Performance Profile")
@@ -217,6 +218,16 @@ class MainWindow(QMainWindow):
             return
 
         self.mpr_viewer.set_plane(plane)
+
+    def _sync_mpr_menu_state(self) -> None:
+        """
+        Enable single-viewer plane switching only in the single-MPR layout
+
+        In 4-up mode each pane has a fixed role, so allowing the old plane menu
+        to mutate one pane would break the Phase 1/2 layout contract.
+        """
+        is_single_mpr = self.multi_viewer_panel.layout_mode == ViewerLayoutMode.SINGLE_MPR
+        self._mpr_menu.setEnabled(is_single_mpr)
 
     def _update_undo_redo_enabled(self):
         """Synchronize the enabled status of Undo/Redo actions with the history manager."""

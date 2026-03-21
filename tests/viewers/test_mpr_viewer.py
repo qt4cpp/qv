@@ -5,7 +5,7 @@ from __future__ import annotations
 from PySide6 import QtWidgets
 
 from qv.core.window_settings import WindowSettings
-from qv.viewers.mpr_viewer import MprPlane
+from qv.viewers.mpr_viewer import MprPlane, MprViewer
 
 
 def test_mpr_viewer_fixture_creates_widget(mpr_viewer):
@@ -46,6 +46,56 @@ def test_set_image_data_initializes_window_settings_and_slice_state(
     assert mpr_viewer._slice_index == 1
     assert mpr_viewer.get_slice_count() == 3
 
+
+def test_constructor_plane_is_used_when_image_is_loaded(
+        qtbot,
+        settings_mgr,
+        monkeypatch,
+        sample_image_data,
+):
+    """
+    The constructor plane should define the initial slice axis in 4-up mode.
+    """
+    from qv.viewers.base_viewer import BaseViewer
+
+    monkeypatch.setattr(BaseViewer, "_initialize_interactor", lambda self: None)
+
+    coronal_viewer = MprViewer(
+        settings_manager=settings_mgr,
+        plane=MprPlane.CORONAL
+    )
+    qtbot.addWidget(coronal_viewer)
+
+    with qtbot.waitSignal(coronal_viewer.dataLoaded, timeout=1000):
+        coronal_viewer.set_image_data(sample_image_data)
+
+    assert coronal_viewer.plane == MprPlane.CORONAL
+    assert coronal_viewer._slice_min == 0
+    assert coronal_viewer._slice_max == 4
+    assert coronal_viewer._slice_index == 2
+    assert coronal_viewer.get_slice_count() == 5
+
+
+def test_plane_overlay_shows_plane_name_ater_construction(mpr_viewer):
+    """
+    The pane label should identiy the viewer even beffore image load.
+    """
+    actor = mpr_viewer._plane_overlay_actor
+    assert actor is not None
+    assert actor.GetInput() == "Axial"
+
+
+def test_plane_overlay_updates_after_image_load(mpr_viewer, sample_image_data):
+    """
+    The overlay should include plane name and a user-facing slice number.
+    """
+    mpr_viewer.set_image_data(sample_image_data)
+
+    actor = mpr_viewer._plane_overlay_actor
+    assert actor is not None
+    assert actor.GetInput() == "Axial Slice 2/3"
+
+
 def test_set_window_settings_clamps_to_scalar_range(mpr_viewer, sample_image_data):
     """
     Explicit WW/WL updates should be clamped to the scalar range.
@@ -75,6 +125,21 @@ def test_scroll_slice_clamps_to_valid_range(mpr_viewer, sample_image_data):
 
     mpr_viewer.scroll_slice(-10)
     assert mpr_viewer._slice_index == 0
+
+
+def test_set_slice_index_updates_plane_overlay(
+        mpr_viewer,
+        sample_image_data,
+):
+    """
+    Slice overlay text should track the active slice of that viewer only.
+    """
+    mpr_viewer.set_image_data(sample_image_data)
+    mpr_viewer.set_slice_index(2)
+
+    actor = mpr_viewer._plane_overlay_actor
+    assert actor is not None
+    assert actor.GetInput() == "Axial Slice 3/3"
 
 
 def test_set_slice_index_emits_slice_changed_with_clamped_value(
@@ -123,6 +188,10 @@ def test_set_plane_recomputes_slice_range_and_resets_to_center(
     assert mpr_viewer._slice_max == 4
     assert mpr_viewer._slice_index == 2
     assert mpr_viewer.get_slice_count() == 5
+
+    actor = mpr_viewer._plane_overlay_actor
+    assert actor is not None
+    assert actor.GetInput() == "Coronal Slice 3/5"
 
 
 def test_set_image_data_shows_window_overlay_after_initial_load(

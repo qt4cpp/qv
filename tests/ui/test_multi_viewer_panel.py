@@ -45,6 +45,7 @@ class FakeMprViewer(QtWidgets.QWidget):
         self.plane = plane
         self.received_images = []
         self.window_settings = None
+        self.slice_index = 0
 
     def set_image_data(self, image) -> None:
         self.received_images.append(image)
@@ -52,6 +53,10 @@ class FakeMprViewer(QtWidgets.QWidget):
     def set_window_settings(self, settings: WindowSettings) -> None:
         self.window_settings = settings
         self.windowSettingsChanged.emit(settings)
+
+    def scroll_slice(self, delta: int) -> None:
+        """Record local slice motion without affecting sibling viewers."""
+        self.slice_index += int(delta)
 
 
 def test_multi_viewer_panel_builds_fixed_four_view_layout(
@@ -87,6 +92,10 @@ def test_multi_viewer_panel_builds_fixed_four_view_layout(
         MprPlane.CORONAL,
         MprPlane.SAGITTAL,
     }
+
+    assert panel.mpr_axial_viewer.plane == MprPlane.AXIAL
+    assert panel.mpr_coronal_viewer.plane == MprPlane.CORONAL
+    assert panel.mpr_sagittal_viewer.plane == MprPlane.SAGITTAL
 
 
 def test_multi_viewer_panel_loaded_volume_image_to_all_mpr_viewers(
@@ -152,3 +161,25 @@ def test_multi_viewer_panel_keeps_all_window_settings_independent(
     assert panel.volume_viewer.window_settings == next_volume_settings
     assert panel.mpr_axial_viewer.window_settings == axial_settings
     assert panel.mpr_sagittal_viewer.window_settings == sagittal_settings
+
+
+def test_multi_viewer_panel_keeps_slice_navigation_independent(
+        monkeypatch: pytest.MonkeyPatch,
+        qtbot,
+) -> None:
+    """
+    Scrolling one MPR pane must not chnage the sibling panes.
+    """
+    monkeypatch.setattr(multi_viewer_panel_module, "VolumeViewer", FakeVolumeViewer)
+    monkeypatch.setattr(multi_viewer_panel_module, "MprViewer", FakeMprViewer)
+
+    panel = multi_viewer_panel_module.MultiViewerPanel(settings_mgr=object())
+    qtbot.addWidget(panel)
+
+    panel.mpr_axial_viewer.scroll_slice(+1)
+    panel.mpr_axial_viewer.scroll_slice(+1)
+    panel.mpr_coronal_viewer.scroll_slice(-1)
+
+    assert panel.mpr_axial_viewer.slice_index == 2
+    assert panel.mpr_coronal_viewer.slice_index == -1
+    assert panel.mpr_sagittal_viewer.slice_index == 0
