@@ -576,6 +576,41 @@ class MprViewer(BaseViewer):
         clamped = max(min_index, min(int(slice_index), max_index))
         return origin[axis] + clamped * spacing[axis]
 
+    def _build_crosshair_world_position(self) -> tuple[float, float, float] | None:
+        """
+        Build the crosshair intersection point in source-world coordinates.
+
+        World space is the canonical source of truth. Each viewer then converts
+        that point into its own displayed slice space.
+        """
+        vertical_plane, horizontal_plane = CROSSHAIR_REFERENCE_PLANE[self._plane]
+        vertical_index = self._crosshair_slice_refs[vertical_plane]
+        horizontal_index = self._crosshair_slice_refs[horizontal_plane]
+
+        if vertical_index is None or horizontal_index is None:
+            logger.debug("[MprViewer:%s] Index is None, skipping crosshair rendering.",
+                         self._plane.value)
+            return None
+
+        if self._plane == MprPlane.AXIAL:
+            return (
+                self._slice_index_to_world(MprPlane.SAGITTAL, vertical_index),  # x
+                self._slice_index_to_world(MprPlane.CORONAL, horizontal_index), # y
+                self._slice_index_to_world(MprPlane.AXIAL, self._slice_index),  # z
+            )
+        elif self._plane == MprPlane.CORONAL:
+            return (
+                self._slice_index_to_world(MprPlane.SAGITTAL, vertical_index),
+                self._slice_index_to_world(MprPlane.CORONAL, self._slice_index),
+                self._slice_index_to_world(MprPlane.AXIAL, horizontal_index),
+            )
+        else:
+            return (
+                self._slice_index_to_world(MprPlane.SAGITTAL, self._slice_index),
+                self._slice_index_to_world(MprPlane.CORONAL, vertical_index),
+                self._slice_index_to_world(MprPlane.AXIAL, horizontal_index),
+            )
+
     def _build_crosshair_segments(
             self,
     ) -> dict[str, tuple[tuple[float, float, float], tuple[float, float, float]]] | None:
@@ -589,14 +624,6 @@ class MprViewer(BaseViewer):
         if self._image_data is None:
             return None
 
-        vertical_plane, horizontal_plane = CROSSHAIR_REFERENCE_PLANE[self._plane]
-        vertical_index = self._crosshair_slice_refs[vertical_plane]
-        horizontal_index = self._crosshair_slice_refs[horizontal_plane]
-
-        if vertical_index is None or horizontal_index is None:
-            logger.debug("[MprViewer:%s] Index is None, skipping crosshair rendering.",
-                         self._plane.value)
-            return None
 
         display_bounds = self._get_display_bounds()
         if display_bounds is None:
@@ -604,44 +631,38 @@ class MprViewer(BaseViewer):
                          self._plane.value)
             return None
 
-        if self._plane == MprPlane.AXIAL:
-            current_z = self._slice_index_to_world(MprPlane.AXIAL, self._slice_index)
-            cross_x = self._slice_index_to_world(MprPlane.SAGITTAL, vertical_index)
-            cross_y = self._slice_index_to_world(MprPlane.CORONAL, horizontal_index)
-            return {
-                "vertical": (
-                    (cross_x, display_bounds[2], current_z),
-                    (cross_x, display_bounds[3], current_z)
-                ),
-                "horizontal": (
-                    (display_bounds[0], cross_y, current_z),
-                    (display_bounds[1], cross_y, current_z)
-                ),
-            }
+        crosshair_world = self._build_crosshair_world_position()
+        if crosshair_world is None:
+            logger.debug("[MprViewer:%s] Crosshair world position is None, skipping crosshair rendering.",
+                         self._plane.value)
+            return None
 
-        if self._plane == MprPlane.CORONAL:
-            current_y = self._slice_index_to_world(MprPlane.CORONAL, self._slice_index)
-            cross_x = self._slice_index_to_world(MprPlane.SAGITTAL, vertical_index)
-            cross_z = self._slice_index_to_world(MprPlane.AXIAL, horizontal_index)
-            return {
-                "vertical": (
-                    (cross_x, current_y, display_bounds[4]),
-                    (cross_x, current_y, display_bounds[5])
-                ),
-                "horizontal": (
-                    (display_bounds[0], current_y, cross_z),
-                    (display_bounds[1], current_y, cross_z)
-                ),
-            }
+        corsshair_display = self._world_to_display_point(crosshair_world)
+        if crosshair_world is None:
+            logger.debug("[MprViewer:%s] Crosshair display position is None, skipping crosshair rendering.",
+                         self._plane.value)
+            return None
 
-        current_x = self._slice_index_to_world(MprPlane.SAGITTAL, self._slice_index)
-        cross_y = self._slice_index_to_world(MprPlane.CORONAL, vertical_index)
-        cross_z = self._slice_index_to_world(MprPlane.AXIAL, horizontal_index)
+        display_x, display_y, display_z = corsshair_display
+        plane_z = 0.5 * (display_bounds[4] + display_bounds[5])
+
+        logger.debug(
+            "[MprViewer:%s] Crosshair world=%s display=%s bounds=%s)",
+            self._plane.value,
+            crosshair_world,
+            corsshair_display,
+            display_bounds,
+        )
+
         return {
-            "vertical": ((current_x, cross_y, display_bounds[4]),
-                         (current_x, cross_y, display_bounds[5])),
-            "horizontal": ((current_x, display_bounds[2], cross_z),
-                           (current_x, display_bounds[3], cross_z)),
+            "vertical": (
+                (display_x, display_bounds[2], plane_z),
+                (display_x, display_bounds[3], plane_z),
+            ),
+            "horizontal": (
+            (display_bounds[0], display_y, plane_z),
+            (display_bounds[1], display_y, plane_z),
+            ),
         }
 
     def _refresh_crosshair_overlay(self, *, render: bool = True) -> None:
@@ -670,3 +691,53 @@ class MprViewer(BaseViewer):
 
         if render:
             self.update_view()
+
+    def _get_current_reslice_axes_components(
+            self,
+    ) -> tuple[tuple[float, float, float], tuple[float, float, float], tuple[float, float, float]] | None:
+        """
+        Return the active reslice basis vectors and origin.
+
+        The basis vectors come  from PLANE_AXES and define how displayed slice
+        coodinates map into source-world coordinates.
+        """
+        if self._reslice is None or self._image_data is None:
+            return None
+
+        axes = PLANE_AXES[self._plane]
+        x_axis = (axes[0], axes[1], axes[2])
+        y_axis = (axes[3], axes[4], axes[5])
+        z_axis = (axes[6], axes[7], axes[8])
+
+        origin = self._reslice.GetResliceAxesOrigin()
+
+        if origin is None:
+            return None
+
+        return x_axis, y_axis, z_axis, (origin[0], origin[1], origin[2])
+
+    def _world_to_display_point(
+            self,
+            world_point: tuple[float, float, float],
+    ) -> tuple[float, float, float] | None:
+        """
+        Convert a source-world point into the displayed slice coordinate system.
+
+        ResliceAxes defines the displyaed slice baiss in source-world space.
+        Because the basis is orthhonormal for the fixed 3-plane setup, the
+        inverse mapping is just dot(wordl - origin, axis).
+        """
+        axes_components = self._get_current_reslice_axes_components()
+        if axes_components is None:
+            return None
+
+        x_axis, y_axis, z_axis, origin = axes_components
+        dx = world_point[0] - origin[0]
+        dy = world_point[1] - origin[1]
+        dz = world_point[2] - origin[2]
+
+        display_x = dx  * x_axis[0] + dy * x_axis[1] + dz * x_axis[2]
+        display_y = dx  * y_axis[0] + dy * y_axis[1] + dz * y_axis[2]
+        display_z = dx  * z_axis[0] + dy * z_axis[1] + dz * z_axis[2]
+
+        return display_x, display_y, display_z
