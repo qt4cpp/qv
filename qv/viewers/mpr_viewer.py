@@ -247,6 +247,7 @@ class MprViewer(BaseViewer):
 
         self._setup_camera(self._plane)
         self.update_view()
+        logger.info("MPR plane switched to %s", plane)
         self.sliceChanged.emit(self._plane, self._slice_index)
 
     def _update_reslice(self) -> None:

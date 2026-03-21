@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import enum
+
+import vtk
 from PySide6 import QtCore, QtWidgets
 
 from qv.app.app_settings_manager import AppSettingsManager
@@ -8,51 +11,52 @@ from qv.viewers.mpr_viewer import MprPlane, MprViewer
 from qv.viewers.volume_viewer import VolumeViewer
 
 
+class ViewerLayoutMode(enum.Enum):
+    """Supported viewer-layout modes."""
+
+    SINGLE_MPR = "single_mpr"
+    QUAD = 'quad'
+
+
 class MultiViewerPanel(QtWidgets.QWidget):
     """
     Container widget for multiple viewers.
 
-    Phase 1 keeps the responsibility intentionally narrow:
-    - create one VR viewer and three fixed MPR viewers.
-    - arrange them in a stable 2x2 layout
-    - distribute the shared vtkImageData to allMPR viewers after volume load
+    Responsibilities:
+    - own the viewer instances
+    - manage layout switching
+    - distribute the shared vtkImageData to relevant MPR viewers
     """
 
     def __init__(self,
                  settings_mgr: AppSettingsManager | None = None,
                  parent: QtWidgets.QWidget | None = None,
+                 *,
+                 layout_mode: ViewerLayoutMode = ViewerLayoutMode.QUAD
     ) -> None:
         super().__init__(parent)
         self.setting = settings_mgr or AppSettingsManager()
 
+        self._layout_mode = layout_mode
+        self._shared_image: vtk.vtkImageData | None = None
         self._viewers: dict[str, QtWidgets.QWidget] = {}
         self.mpr_viewers: dict[MprPlane, MprViewer] = {}
 
-        self._build_layout()
+        self._build_shell()
         self._create_viewers()
+        self._apply_layout(layout_mode)
 
         self.volume_viewer.dataLoaded.connect(self._on_volume_data_loaded)
-
         QtCore.QTimer.singleShot(0, self._initialize_splitter_sizes)
 
-    def _build_layout(self) -> None:
-        """Create nested splitters that form a resizable 2x2 grid."""
-        layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+    def _build_shell(self) -> None:
+        """Create a root layout and a placeholder container for dynamic layouts."""
+        root_layout = QtWidgets.QVBoxLayout(self)
+        root_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.splitter = QtWidgets.QSplitter(QtCore.Qt.Vertical, self)
-        self.top_splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal, self.splitter)
-        self.bottom_splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal, self.splitter)
-
-        for splitter in (self.splitter, self.top_splitter, self.bottom_splitter):
-            splitter.setChildrenCollapsible(False)
-            splitter.setHandleWidth(5)
-            splitter.setOpaqueResize(True)
-
-        self.splitter.addWidget(self.top_splitter)
-        self.splitter.addWidget(self.bottom_splitter)
-
-        layout.addWidget(self.splitter)
+        self._content_layout = QtWidgets.QVBoxLayout()
+        self._content_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.addLayout(self._content_layout)
 
     def _create_viewers(self) -> None:
         """Create the VR viewer and three fixed-plane MPR viewers."""
@@ -76,49 +80,132 @@ class MultiViewerPanel(QtWidgets.QWidget):
             plane=MprPlane.SAGITTAL,
         )
 
-        # Keep compatibility alias while the surrounding UI is migrated away
-        # from the former single-MPR assumption.
-        self.mpr_viewer = self.mpr_axial_viewer
-
         self.mpr_viewers = {
             MprPlane.AXIAL: self.mpr_axial_viewer,
             MprPlane.CORONAL: self.mpr_coronal_viewer,
             MprPlane.SAGITTAL: self.mpr_sagittal_viewer,
         }
 
-        self.add_viewer(self.volume_viewer, "volume", self.top_splitter)
-        self.add_viewer(self.mpr_axial_viewer, "mpr_axial", self.top_splitter)
-        self.add_viewer(self.mpr_coronal_viewer, "mpr_coronal", self.bottom_splitter)
-        self.add_viewer(self.mpr_sagittal_viewer, "mpr_sagittal", self.bottom_splitter)
+        # Backward-compatible alias
+        # In SINGLE_MPR mode this is the visible MPR viewer.
+        # In QUAD mode old code should stop depending on this.
+        self.mpr_viewer = self.mpr_axial_viewer
 
-        self.top_splitter.setStretchFactor(0, 1)
-        self.top_splitter.setStretchFactor(1, 1)
-        self.bottom_splitter.setStretchFactor(0, 1)
-        self.bottom_splitter.setStretchFactor(1, 1)
-        self.splitter.setStretchFactor(0, 1)
-        self.splitter.setStretchFactor(1, 1)
+    @property
+    def layout_mode(self) -> ViewerLayoutMode:
+        """Return the current layout mode."""
+        return self._layout_mode
 
-        for viewer in self._viewers.values():
-            # Keep each pane usable even before the user resizes splitters.
-            viewer.setMinimumSize(240, 180)
-
-    def add_viewer(
-            self,
-            viewer: QtWidgets.QWidget,
-            name: str,
-            container: QtWidgets.QSplitter
-    ) -> None:
+    def set_layout_mode(self, mode: ViewerLayoutMode) -> None:
         """
-        Add a viewer widget into the requested splitter container.
+        Switch the panel layout without changing the underlying loaded  data.
 
-        This remains generic so later phases can reshuffle the layout without
-        changing the external panel API.
+        The shared image is redistributed after the layout swap so the visible
+        viewers always have valid input data.
         """
-        if name in self._viewers:
-            raise ValueError(f"Viewer with name '{name}' already exists.")
+        if mode == self._layout_mode:
+            return
 
-        self._viewers[name] = viewer
-        container.addWidget(viewer)
+        self._apply_layout(mode)
+        self._layout_mode = mode
+        self._redistribute_image_data()
+        self._initialize_splitter_sizes()
+
+    def set_image_data(self, image_data: vtk.vtkImageData | None) -> None:
+        """
+        Store the shared image and distribute it to the active MPR viewers.
+
+        Keeping this API at the panel layer avoids coupling image distribution
+        to VolumeVieewer internals.
+        """
+        self._shared_image = image_data
+        self._redistribute_image_data()
+
+    def _clear_content_layout(self) -> None:
+        """Detach previous layout widgets before rebuilding the UI structure."""
+        while self._content_layout.count():
+            item = self._content_layout.takeAt(0)
+            widget = item.widget()
+            child_layout = item.layout()
+
+            if widget is not None:
+                widget.setParent(None)
+            elif child_layout is not None:
+                self._delete_layout(child_layout)
+
+    def _delete_layout(self, layout: QtWidgets.QLayout) -> None:
+        """Recursively detach child widgets/layouts."""
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            child_layout = item.layout()
+
+            if widget is not None:
+                widget.setParent(None)
+            elif child_layout is not None:
+                self._delete_layout(child_layout)
+
+    def _apply_layout(self, mode: ViewerLayoutMode):
+        """Rebuild the visible layout around the exsting viewer instances."""
+        self._clear_content_layout()
+
+        if mode == ViewerLayoutMode.SINGLE_MPR:
+            self._build_single_mpr_layout()
+        else:
+            self._build_quad_layout()
+
+    def _build_single_mpr_layout(self) -> None:
+        """Build the 2-pane layout.
+
+        For now the single visible MPR is axial. If you later want menu-driven
+        plane switching again, call ``self.mpr_viewer.set_plane(...)``.
+        """
+        self.main_splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal, self)
+        self.main_splitter.setChildrenCollapsible(False)
+        self.main_splitter.addWidget(self.volume_viewer)
+        self.main_splitter.addWidget(self.mpr_viewer)
+
+        self._content_layout.addWidget(self.main_splitter)
+
+    def _build_quad_layout(self) -> None:
+        """Build 2x2 VR + three-MPR layout."""
+        self.main_splitter = QtWidgets.QSplitter(QtCore.Qt.Vertical, self)
+        self.main_splitter.setChildrenCollapsible(False)
+
+        self.top_splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal, self.main_splitter)
+        self.bottom_splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal, self.main_splitter)
+
+        for  splitter in (self.main_splitter, self.top_splitter, self.bottom_splitter):
+            splitter.setChildrenCollapsible(False)
+            splitter.setHandleWidth(6)
+            splitter.setOpaqueResize(True)
+
+        self.top_splitter.addWidget(self.volume_viewer)
+        self.top_splitter.addWidget(self.mpr_axial_viewer)
+        self.bottom_splitter.addWidget(self.mpr_coronal_viewer)
+        self.bottom_splitter.addWidget(self.mpr_sagittal_viewer)
+
+        self._content_layout.addWidget(self.main_splitter)
+
+    def _visible_mpr_viewers(self) -> list[MprViewer]:
+        """Return the MPR viewers that should currently receive image data."""
+        if self._layout_mode == ViewerLayoutMode.SINGLE_MPR:
+            return [self.mpr_viewer]
+        return list(self.mpr_viewers.values())
+
+    def _redistribute_image_data(self) -> None:
+        """
+        Distribute the latest shared image to the currently active MPR viewers.
+
+        Hidden viewers are intentionally skipped to keep mode-switch behavior
+        explicit and easier to reason about.
+        """
+        if self._shared_image is None:
+            logger.debug("[MultiViewerPanel] No image data to distribute.")
+            return
+
+        for viewer in self._visible_mpr_viewers():
+            viewer.set_image_data(self._shared_image)
 
     def _initialize_splitter_sizes(self) -> None:
         """Start all panes with an even split in both directions."""
@@ -127,13 +214,16 @@ class MultiViewerPanel(QtWidgets.QWidget):
 
         self.top_splitter.setSizes([width, width])
         self.bottom_splitter.setSizes([width, width])
-        self.splitter.setSizes([height, height])
+        self.main_splitter.setSizes([height, height])
 
 
     def _on_volume_data_loaded(self) -> None:
         """Push loaded vtkImageData to MPR viewer"""
         logger.info("[MultiViewerPanel] Volume data load.")
+
         image = self.volume_viewer.source_image
         if image is None:
+            logger.debug("[MultiViewerPanel] No image data to load.")
             return
-        self.mpr_viewer.set_image_data(image)
+
+        self.set_image_data(image)

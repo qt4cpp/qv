@@ -14,7 +14,7 @@ from qv.app.status import STATUS_FIELDS, StatusField
 from qv.app.shortcut_manager import ShortcutManager
 from qv.viewers.mpr_viewer import MprViewer, MprPlane
 from qv.ui.widgets.histgram_widget import HistogramWidget
-from qv.ui.widgets.multi_viewer_panel import MultiViewerPanel
+from qv.ui.widgets.multi_viewer_panel import MultiViewerPanel, ViewerLayoutMode
 import qv.utils.vtk_helpers as vtk_helpers
 import copy
 
@@ -71,6 +71,7 @@ class MainWindow(QMainWindow):
         self.multi_viewer_panel = MultiViewerPanel(
             settings_mgr=self.setting,
             parent=central_widget,
+            layout_mode=ViewerLayoutMode.QUAD,
         )
 
         # Keep compatibility with existing MainWindow code paths.
@@ -117,8 +118,24 @@ class MainWindow(QMainWindow):
         view_menu.addAction("2x zoom", self.volume_viewer.set_zoom_2x)
         view_menu.addAction("0.5x zoom", self.volume_viewer.set_zoom_half)
         view_menu.addSeparator()
-        mpr_menu = view_menu.addMenu("MPR")
 
+        layout_menu = view_menu.addMenu("Layout")
+        quad_action = QAction("4-up", self)
+        quad_action.triggered.connect(
+            lambda: self.multi_viewer_panel.set_layout_mode(ViewerLayoutMode.QUAD)
+        )
+        layout_menu.addAction(quad_action)
+
+        # Single_mpr: 将来の有効化のためにメニュー枠だけ作成する
+        single_action = QAction("2-pane", self)
+        single_action.triggered.connect(
+            lambda: self.multi_viewer_panel.set_layout_mode(ViewerLayoutMode.SINGLE_MPR)
+        )
+        layout_menu.addAction(single_action)
+
+        # Single-mpr 用メニュー
+        # SINGLE_MPR モードでのみ使用する
+        mpr_menu = view_menu.addMenu("MPR")
         self._mpr_plane_group = QActionGroup(self)
         self._mpr_plane_group.setExclusive(True)
         self._mpr_plane_actions: dict[str, QAction] = {}
@@ -130,7 +147,8 @@ class MainWindow(QMainWindow):
         ):
             action = QAction(label, self)
             action.setCheckable(True)
-            action.triggered.connect(lambda checked, p=plane: self._on_select_mpr_plane(p, checked)
+            action.triggered.connect(
+                lambda checked, p=plane: self._on_select_mpr_plane(p, checked)
             )
             self._mpr_plane_group.addAction(action)
             self._mpr_plane_actions[plane] = action
@@ -185,8 +203,19 @@ class MainWindow(QMainWindow):
         self.volume_viewer.set_profile(profile_name)
 
     def _on_select_mpr_plane(self, plane: MprPlane, checked: bool) -> None:
+        """
+        Switch plane only when the panel is in single-MPR mode.
+
+        In quad mode, each viewer already owns a fixed plane, so this menu
+        should not mutate one pane arbitarity.
+        """
         if not checked:
             return
+
+        if self.multi_viewer_panel.layout_mode != ViewerLayoutMode.SINGLE_MPR:
+            logger.warning("Ignoring MPR plane change outside SINGLE_MPR mode.")
+            return
+
         self.mpr_viewer.set_plane(plane)
 
     def _update_undo_redo_enabled(self):
