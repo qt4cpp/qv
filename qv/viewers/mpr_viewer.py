@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import enum
 import logging
+from xml.sax.handler import property_interning_dict
 
 import vtk
 from PySide6 import QtCore
@@ -48,6 +49,14 @@ PLANE_AXES_INDEX: dict[MprPlane, int] = {
     MprPlane.SAGITTAL: 0,
 }
 
+# Crosshair uses other viewers' current slice positions.
+# Order is (vertical_line_source_lane, horizontal_line_source_plane).
+CROSSHAIR_REFERENCE_PLANE: dict[MprPlane, tuple[MprPlane, MprPlane]] = {
+    MprPlane.AXIAL: (MprPlane.SAGITTAL, MprPlane.CORONAL),
+    MprPlane.CORONAL: (MprPlane.SAGITTAL, MprPlane.AXIAL),
+    MprPlane.SAGITTAL: (MprPlane.CORONAL, MprPlane.AXIAL),
+}
+
 
 class MprViewer(BaseViewer):
     """2D MPR viewer."""
@@ -64,8 +73,14 @@ class MprViewer(BaseViewer):
         """
         Initialize an MPR viewer bound to a fixed anatomical plane by default.
 
-        In the 4-up layout each viewer keeps its own fixed plane, while the
-        legacy single-MPR layout can still switch planes through ``set_plane()``.
+        The viewer owns its own:
+        - slice position
+        - WW/WL state
+        - camera state
+        - crosshair overlay
+
+        The crosshair itself is display-only. It reflects slice positions held by
+        sibling viewers and does not modify any slice state.
         """
         self._image_data: vtk.vtkImageData | None = None
         self._plane: MprPlane = plane
@@ -78,15 +93,22 @@ class MprViewer(BaseViewer):
         self._image_actor: vtk.vtkImageActor | None = None
         self._interactor_style: vtk.vtkInteractorStyleImage | None = None
 
-        # A compact top-lefft ovaerlay makes it easy to identify each pane during
-        # Phase 2 validation without coupling the viewer to any Qt label widget.
         self._plane_overlay_actor: vtk.vtkTextActor | None = None
+        self._crosshair_line_source: dict[str, vtk.vtkLineSource] = {}
+        self._crosshair_actor: dict[str, vtk.vtkActor] = {}
+        self._crosshair_slice_refs: dict[MprPlane, int | None] = {
+            MprPlane.AXIAL: None,
+            MprPlane.CORONAL: None,
+            MprPlane.SAGITTAL: None,
+        }
+        self._crosshair_visible: bool = False
 
         self.delta_per_pixel: float = 1.0
 
         super().__init__(settings_manager, parent)
 
         self._init_plane_overlay()
+        self._init_crosshair_overlay()
         self._setup_pipeline()
         self._sync_plane_overlay_text()
 
@@ -125,6 +147,37 @@ class MprViewer(BaseViewer):
 
         self.overlay_renderer.AddActor(actor)
         self._plane_overlay_actor = actor
+
+    def _init_crosshair_overlay(self) -> None:
+        """
+        Create world-space crosshair actors.
+
+        The overlay renderer shares the main camera so the crosshair stays aligned
+        with the resliced image while remaining visualy above it.
+        """
+        self.overlay_renderer.SetActiveCamera(self.renderer.GetActiveCamera())
+
+        for name, color in (
+            ("vertical", (1.0, 0.35, 0.35)),
+            ("horizontal", (0.35, 1.0, 1.0)),
+        ):
+            line_source = vtk.vtkLineSource()
+            mapper = vtk.vtkPolyDataMapper()
+            mapper.SetInputConnection(line_source.GetOutputPort())
+
+            actor = vtk.vtkActor()
+            actor.SetMapper(mapper)
+
+            prop = actor.GetProperty()
+            prop.SetColor(*color)
+            prop.SetLineWidth(2)
+            prop.LightingOff()
+
+            actor.VisibilityOff()
+            self.overlay_renderer.AddActor(actor)
+
+            self._crosshair_line_source[name] = line_source
+            self._crosshair_actor[name] = actor
 
     def _format_plane_overlay_text(self) -> str:
         """
@@ -255,6 +308,7 @@ class MprViewer(BaseViewer):
         self._update_reslice()
         self._setup_camera(self._plane)
         self._sync_plane_overlay_text()
+        self._refresh_crosshair_overlay(render=False)
         self.update_view()
         self.dataLoaded.emit()
 
@@ -291,6 +345,7 @@ class MprViewer(BaseViewer):
         self._update_reslice()
         self._setup_camera(self._plane)
         self._sync_plane_overlay_text()
+        self._refresh_crosshair_overlay(render=False)
         self.update_view()
 
         logger.info("MPR plane switched to %s", plane)
@@ -333,35 +388,68 @@ class MprViewer(BaseViewer):
                     we[0], we[1], we[2], we[3], we[4], we[5]
                 )
 
+    def _get_display_bounds(self) -> tuple[float, float, float, float, float, float] | None:
+        """
+        Return bounds of the currently displayed reslice output.
+
+        Crosshair and camera setup must use the displayed slice space rather than
+        the source volume bounds, otherwise the overlay and camera drift apart.
+        """
+        if self._image_actor is None:
+            return None
+
+        bounds = self._image_actor.GetBounds()
+        if bounds is None:
+            return None
+
+        # Guard against uninitializecd / invalid actor bounds.
+        if not all(abs(value) < 1e300 for value in bounds):
+            return None
+
+        return bounds
+
     def _setup_camera(self, plane: MprPlane) -> None:
-        """Configure the camera for the given plane."""
-        if self._image_data is None:
+        """
+        Configure the camera for the currently displayed 2D reslice output.
+
+        At this stage the camera setup is shared across all planes because each
+        vtkImageReslice output is displayed as a 2D image actor in the viewer.
+        The ``plane`` argument is kept to preserve the public/internal contract
+        and to make future plane-specific tuning straightforward.
+        """
+        bounds = self._get_display_bounds()
+        if bounds is None:
+            logger.warning("Camera setup skipped: no display bounds.")
             return
 
-        bounds = self._image_data.GetBounds()
-        bx = bounds[1] - bounds[0]
-        by = bounds[3] - bounds[2]
+        width = max(bounds[1] - bounds[0], 1.0)
+        height = max(bounds[3] - bounds[2], 1.0)
+        distance = max(width, height) * 2.0
 
-        if max(bx, by) < 1e-6:
-            return
-
-        # ボリュームの物理的な中心を計算
-        cx = 0.5 * (bounds[0] + bounds[1])
-        cy = 0.5 * (bounds[2] + bounds[3])
-        cz = 0.5 * (bounds[4] + bounds[5])
-
-        dist = max(bx, by, 1.0) * 2.0
+        center = (
+            0.5 * (bounds[0] + bounds[1]),
+            0.5 * (bounds[2] + bounds[3]),
+            0.5 * (bounds[4] + bounds[5]),
+        )
 
         camera = self.renderer.GetActiveCamera()
         camera.SetParallelProjection(True)
-        camera.SetFocalPoint(cx, cy, cz)
-        camera.SetPosition(cx, cy, cz + dist)
+        camera.SetFocalPoint(*center)
+        camera.SetPosition(center[0], center[1], center[2] + distance)
         # Keep camera direction on +Z (stable), and flip vertical orientation only.
         camera.SetViewUp(0.0, -1.0, 0.0)
         camera.OrthogonalizeViewUp()
 
         self.renderer.ResetCamera()
         self.renderer.ResetCameraClippingRange()
+        self.overlay_renderer.ResetCameraClippingRange()
+
+        logger.debug(
+            "[MprViewer:%s] Camera aligned for plane=%s with display bounds=%s",
+            self._plane.value,
+            plane.value,
+            bounds,
+        )
 
     def set_slice_index(self, index: int) -> None:
         """Set the current slice index for the active plane and refresh the view.
@@ -373,14 +461,17 @@ class MprViewer(BaseViewer):
             return
 
         clamped_index = max(self._slice_min, min(int(index), self._slice_max))
-
         if clamped_index == self._slice_index:
             return
 
         self._slice_index = clamped_index
         self._update_reslice()
+        self._setup_camera(self._plane)
         self._sync_plane_overlay_text()
+        self._refresh_crosshair_overlay(render=False)
         self.update_view()
+
+        logger.debug("[MprViewer:%s] Slice index set to %s", self._plane.value, clamped_index)
         self.sliceChanged.emit(self._plane, self._slice_index)
 
     def scroll_slice(self, delta: int) -> None:
@@ -415,3 +506,167 @@ class MprViewer(BaseViewer):
             scalar_range=scalar_range,
         )
         self.set_window_settings(adjusted)
+
+    def set_crosshair_visible(self, visible: bool, *, render: bool = True) -> None:
+        """
+        Enable or disable crosshair display for this viewer.
+
+        The overlay state is distinct from slice state; turning the overlay off
+        never mutates the viewer's current slice.
+        """
+        if self._crosshair_visible == visible:
+            return
+
+        self._crosshair_visible = visible
+        logger.debug("[MprViewer:%s] Crosshair visility -> %s", self._plane.value, visible)
+        self._refresh_crosshair_overlay(render=render)
+
+    def clear_crosshair_reference(self, *, render: bool = True) -> None:
+        """Clear stored sibling-slice reference and hide crosshair lines."""
+        for plane in self._crosshair_slice_refs:
+            self._crosshair_slice_refs[plane] = None
+        self._refresh_crosshair_overlay(render=render)
+
+    def set_crosshair_slice_reference(
+            self,
+            plane: MprPlane,
+            slice_index: int | None,
+            *,
+            render: bool = True,
+    ) -> None:
+        """
+        Store another viewer's current slice for crosshair rendering.
+
+        Theviewer intentionally ignores refrences for its own plane because a
+        pane never draws a crosshair from its own slice.
+        """
+        if plane == self._plane:
+            return
+
+        normalized = None if slice_index is None else int(slice_index)
+        if self._crosshair_slice_refs[plane] == normalized:
+            return
+
+        self._crosshair_slice_refs[plane] = normalized
+        logger.debug(
+            "[MprViewer:%s] Crosshair reference updated from %s -> %s",
+            self._plane.value,
+            plane.value,
+            normalized,
+        )
+        self._refresh_crosshair_overlay(render=render)
+
+    def _set_crosshair_actor_visibility(self, visible: bool) -> None:
+        """Show or hide both crosshair line actors."""
+        for actor in self._crosshair_actor.values():
+            actor.SetVisibility(1 if visible else 0)
+
+    def _slice_index_to_world(self, plane: MprPlane, slice_index: int) -> float:
+        """Convert a slice index on the given plane to world corrdinate."""
+        if self._image_data is None:
+            raise RuntimeError("Image data not loaded.")
+
+        extent = self._image_data.GetExtent()
+        spacing = self._image_data.GetSpacing()
+        origin = self._image_data.GetOrigin()
+
+        axis = PLANE_AXES_INDEX[plane]
+        min_index = int(extent[2 * axis])
+        max_index = int(extent[2 * axis + 1])
+        clamped = max(min_index, min(int(slice_index), max_index))
+        return origin[axis] + clamped * spacing[axis]
+
+    def _build_crosshair_segments(
+            self,
+    ) -> dict[str, tuple[tuple[float, float, float], tuple[float, float, float]]] | None:
+        """
+        Build world-space line segments for the current crosshair state.
+
+        Returns:
+            dict | None ``{"vertical": (p1, p2), "horizontal": (p1, p2)}``
+            when both required sibling slice references are present, otherwise ``None``.
+        """
+        if self._image_data is None:
+            return None
+
+        vertical_plane, horizontal_plane = CROSSHAIR_REFERENCE_PLANE[self._plane]
+        vertical_index = self._crosshair_slice_refs[vertical_plane]
+        horizontal_index = self._crosshair_slice_refs[horizontal_plane]
+
+        if vertical_index is None or horizontal_index is None:
+            logger.debug("[MprViewer:%s] Index is None, skipping crosshair rendering.",
+                         self._plane.value)
+            return None
+
+        display_bounds = self._get_display_bounds()
+        if display_bounds is None:
+            logger.debug("[MprViewer:%s] Display bounds is None, skipping crosshair rendering.",
+                         self._plane.value)
+            return None
+
+        if self._plane == MprPlane.AXIAL:
+            current_z = self._slice_index_to_world(MprPlane.AXIAL, self._slice_index)
+            cross_x = self._slice_index_to_world(MprPlane.SAGITTAL, vertical_index)
+            cross_y = self._slice_index_to_world(MprPlane.CORONAL, horizontal_index)
+            return {
+                "vertical": (
+                    (cross_x, display_bounds[2], current_z),
+                    (cross_x, display_bounds[3], current_z)
+                ),
+                "horizontal": (
+                    (display_bounds[0], cross_y, current_z),
+                    (display_bounds[1], cross_y, current_z)
+                ),
+            }
+
+        if self._plane == MprPlane.CORONAL:
+            current_y = self._slice_index_to_world(MprPlane.CORONAL, self._slice_index)
+            cross_x = self._slice_index_to_world(MprPlane.SAGITTAL, vertical_index)
+            cross_z = self._slice_index_to_world(MprPlane.AXIAL, horizontal_index)
+            return {
+                "vertical": (
+                    (cross_x, current_y, display_bounds[4]),
+                    (cross_x, current_y, display_bounds[5])
+                ),
+                "horizontal": (
+                    (display_bounds[0], current_y, cross_z),
+                    (display_bounds[1], current_y, cross_z)
+                ),
+            }
+
+        current_x = self._slice_index_to_world(MprPlane.SAGITTAL, self._slice_index)
+        cross_y = self._slice_index_to_world(MprPlane.CORONAL, vertical_index)
+        cross_z = self._slice_index_to_world(MprPlane.AXIAL, horizontal_index)
+        return {
+            "vertical": ((current_x, cross_y, display_bounds[4]),
+                         (current_x, cross_y, display_bounds[5])),
+            "horizontal": ((current_x, display_bounds[2], cross_z),
+                           (current_x, display_bounds[3], cross_z)),
+        }
+
+    def _refresh_crosshair_overlay(self, *, render: bool = True) -> None:
+        """
+        Rebuild and apply the crosshair overlay.
+
+        This method updates only the overlay actors. It never changes this
+        viewer's slice or any sibling slice.
+        """
+        segments = self._build_crosshair_segments()
+
+        if not self._crosshair_visible or segments is None:
+            self._set_crosshair_actor_visibility(False)
+            if render:
+                self.update_view()
+            return
+
+        for name, (point1, point2) in segments.items():
+            line_source = self._crosshair_line_source[name]
+            line_source.SetPoint1(*point1)
+            line_source.SetPoint2(*point2)
+            line_source.Modified()
+
+        self._set_crosshair_actor_visibility(True)
+        self.overlay_renderer.ResetCameraClippingRange()
+
+        if render:
+            self.update_view()

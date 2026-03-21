@@ -26,6 +26,7 @@ class MultiViewerPanel(QtWidgets.QWidget):
     - own the viewer instances
     - manage layout switching
     - distribute the shared vtkImageData to relevant MPR viewers
+    -  crosshair overlays ssynchronized.
     """
 
     def __init__(self,
@@ -44,6 +45,7 @@ class MultiViewerPanel(QtWidgets.QWidget):
 
         self._build_shell()
         self._create_viewers()
+        self._connect_mpr_signal()
         self._apply_layout(layout_mode)
 
         self.volume_viewer.dataLoaded.connect(self._on_volume_data_loaded)
@@ -90,6 +92,11 @@ class MultiViewerPanel(QtWidgets.QWidget):
         # In SINGLE_MPR mode this is the visible MPR viewer.
         # In QUAD mode old code should stop depending on this.
         self.mpr_viewer = self.mpr_axial_viewer
+
+    def _connect_mpr_signal(self) -> None:
+        """Connect viewer-local slice changes to panel-level crosshair sync."""
+        for viewer in self.mpr_viewers.values():
+            viewer.sliceChanged.connect(self._on_mpr_slice_changed)
 
     @property
     def layout_mode(self) -> ViewerLayoutMode:
@@ -202,10 +209,13 @@ class MultiViewerPanel(QtWidgets.QWidget):
         """
         if self._shared_image is None:
             logger.debug("[MultiViewerPanel] No image data to distribute.")
+            self._synchronize_crosshair_state()
             return
 
         for viewer in self._visible_mpr_viewers():
             viewer.set_image_data(self._shared_image)
+
+        self._synchronize_crosshair_state()
 
     def _initialize_splitter_sizes(self) -> None:
         """Start all panes with an even split in both directions."""
@@ -216,6 +226,43 @@ class MultiViewerPanel(QtWidgets.QWidget):
         self.bottom_splitter.setSizes([width, width])
         self.main_splitter.setSizes([height, height])
 
+    def _synchronize_crosshair_state(self) -> None:
+        """
+        Push slice positions into each MPR viewer's crosshair overlay state
+
+        This is phase 3 behavior:
+        - overlay only
+        - no sibling slice mutation
+        """
+        visible_viewers = self._visible_mpr_viewers()
+        show_crosshair = (self._layout_mode == ViewerLayoutMode.QUAD and
+                          len(visible_viewers) == 3)
+
+        # In non-quad layouts the crosshair overlay shoudl not appear
+        for viewer in self.mpr_viewers.values():
+            viewer.set_crosshair_visible(show_crosshair, render=False)
+
+            if not show_crosshair:
+                for viewer in self.mpr_viewers.values():
+                    viewer.clear_crosshair_reference(render=False)
+                for viewer in visible_viewers:
+                    viewer.update_view()
+                return
+
+        slice_state = {
+            plane: viewer.slice_index for plane, viewer in self.mpr_viewers.items()
+        }
+
+        logger.debug("[MultiViewerPanel] Synchronizing crosshair state: %s", slice_state)
+
+        for target_viewer in visible_viewers:
+            for source_plane, source_slice in slice_state.items():
+                target_viewer.set_crosshair_slice_reference(
+                    source_plane,
+                    source_slice,
+                    render=False,
+                )
+            target_viewer.update_view()
 
     def _on_volume_data_loaded(self) -> None:
         """Push loaded vtkImageData to MPR viewer"""
@@ -227,3 +274,18 @@ class MultiViewerPanel(QtWidgets.QWidget):
             return
 
         self.set_image_data(image)
+
+    def _on_mpr_slice_changed(self, plane: MprPlane, slice_index: int) -> None:
+        """
+        Update crosshair overlays after a user-driven slice change.
+
+        The source viewer's own slice is already updated locally. This handler
+        only redistributes the new slice index as display state for the other
+        viewers' overlays.
+        """
+        logger.debug(
+            "[MultiViewerPanel] Slice change: %s -> %s",
+            plane.value,
+            slice_index,
+        )
+        self._synchronize_crosshair_state()
