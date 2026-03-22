@@ -170,7 +170,7 @@ class MprViewer(BaseViewer):
 
             prop = actor.GetProperty()
             prop.SetColor(*color)
-            prop.SetLineWidth(2)
+            prop.SetLineWidth(1)
             prop.LightingOff()
 
             actor.VisibilityOff()
