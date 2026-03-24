@@ -31,6 +31,7 @@ class FakeVolumeViewer(QtWidgets.QWidget):
 
 
 class FakeMprViewer(QtWidgets.QWidget):
+    sliceChanged = QtCore.Signal(object, int)
     windowSettingsChanged = QtCore.Signal(object)
 
     def __init__(
@@ -45,7 +46,14 @@ class FakeMprViewer(QtWidgets.QWidget):
         self.plane = plane
         self.received_images = []
         self.window_settings = None
-        self.slice_index = 0
+        self.slice_index = {
+            MprPlane.AXIAL: 10,
+            MprPlane.CORONAL: 20,
+            MprPlane.SAGITTAL: 30,
+        }[plane]
+        self.crosshair_visible = False
+        self.crosshair_refs: dict[MprPlane, int] = {}
+        self.render_count = 0
 
     def set_image_data(self, image) -> None:
         self.received_images.append(image)
@@ -58,6 +66,32 @@ class FakeMprViewer(QtWidgets.QWidget):
         """Record local slice motion without affecting sibling viewers."""
         self.slice_index += int(delta)
 
+    def set_crosshair_visible(self, visible: bool, *, render: bool = True) -> None:
+        self.crosshair_visible = visible
+        if render:
+            self.update_view()
+
+    def clear_crosshair_references(self, *, render: bool = True) -> None:
+        self.crosshair_refs.clear()
+        if render:
+            self.update_view()
+
+    def set_crosshair_slice_reference(
+            self,
+            plane: MprPlane,
+            slice_index: int | None,
+            *,
+            render: bool = True,
+    ) -> None:
+        if plane == self.plane or slice_index is None:
+            return
+        self.crosshair_refs[plane] = int(slice_index)
+        if render:
+            self.update_view()
+
+    def update_view(self) -> None:
+        self.render_count += 1
+
 
 def test_multi_viewer_panel_builds_fixed_four_view_layout(
         monkeypatch: pytest.MonkeyPatch,
@@ -69,7 +103,7 @@ def test_multi_viewer_panel_builds_fixed_four_view_layout(
     monkeypatch.setattr(multi_viewer_panel_module, "VolumeViewer", FakeVolumeViewer)
     monkeypatch.setattr(multi_viewer_panel_module, "MprViewer", FakeMprViewer)
 
-    panel = multi_viewer_panel_module.MultiViewerPanel(settings_mgr=object())
+    panel = multi_viewer_panel_module.MultiViewerPanel()
     qtbot.addWidget(panel)
 
     assert panel.layout_mode == multi_viewer_panel_module.ViewerLayoutMode.QUAD
@@ -180,6 +214,69 @@ def test_multi_viewer_panel_keeps_slice_navigation_independent(
     panel.mpr_axial_viewer.scroll_slice(+1)
     panel.mpr_coronal_viewer.scroll_slice(-1)
 
-    assert panel.mpr_axial_viewer.slice_index == 2
-    assert panel.mpr_coronal_viewer.slice_index == -1
-    assert panel.mpr_sagittal_viewer.slice_index == 0
+    assert panel.mpr_axial_viewer.slice_index == 12
+    assert panel.mpr_coronal_viewer.slice_index == 19
+    assert panel.mpr_sagittal_viewer.slice_index == 30
+
+
+def test_multi_viewer_panel_initializes_crosshair_references_from_all_viewers(
+        monkeypatch: pytest.MonkeyPatch,
+        qtbot,
+) -> None:
+    """
+    display-only crosshair references after image load.
+    """
+    monkeypatch.setattr(multi_viewer_panel_module, "VolumeViewer", FakeVolumeViewer)
+    monkeypatch.setattr(multi_viewer_panel_module, "MprViewer", FakeMprViewer)
+
+    panel = multi_viewer_panel_module.MultiViewerPanel(settings_mgr=object())
+    qtbot.addWidget(panel)
+
+    image = object()
+    panel.volume_viewer.set_source_image(image)
+
+    with qtbot.waitSignal(panel.volume_viewer.dataLoaded, timeout=1000):
+        panel.volume_viewer.dataLoaded.emit()
+
+    assert panel.mpr_axial_viewer.crosshair_visible is True
+    assert panel.mpr_coronal_viewer.crosshair_visible is True
+    assert panel.mpr_sagittal_viewer.crosshair_visible is True
+
+    assert panel.mpr_axial_viewer.crosshair_refs == {
+        MprPlane.CORONAL: 20,
+        MprPlane.SAGITTAL: 30,
+    }
+    assert panel.mpr_coronal_viewer.crosshair_refs == {
+        MprPlane.AXIAL: 10,
+        MprPlane.SAGITTAL: 30,
+    }
+    assert panel.mpr_sagittal_viewer.crosshair_refs == {
+        MprPlane.AXIAL: 10,
+        MprPlane.CORONAL: 20,
+    }
+
+
+def test_multi_viewer_panel_updates_crosshair_only_when_one_slice_changes(
+        monkeypatch: pytest.MonkeyPatch,
+        qtbot,
+) -> None:
+    """
+    Changing one viewer's slice should update overlay references only.
+    """
+    monkeypatch.setattr(multi_viewer_panel_module, "VolumeViewer", FakeVolumeViewer)
+    monkeypatch.setattr(multi_viewer_panel_module, "MprViewer", FakeMprViewer)
+
+    panel = multi_viewer_panel_module.MultiViewerPanel(settings_mgr=object())
+    qtbot.addWidget(panel)
+
+    image = object()
+    panel.volume_viewer.set_source_image(image)
+
+    panel.mpr_axial_viewer.slice_index = 42
+    panel.mpr_axial_viewer.sliceChanged.emit(MprPlane.AXIAL, 42)
+
+    assert panel.mpr_coronal_viewer.slice_index == 20
+    assert panel.mpr_sagittal_viewer.slice_index == 30
+
+    assert panel.mpr_coronal_viewer.crosshair_refs[MprPlane.AXIAL] == 42
+    assert panel.mpr_sagittal_viewer.crosshair_refs[MprPlane.AXIAL] == 42
