@@ -2,16 +2,39 @@ from __future__ import annotations
 
 import enum
 import logging
-from xml.sax.handler import property_interning_dict
+from dataclasses import dataclass
 
 import vtk
 from PySide6 import QtCore
+from PySide6.QtCore import QEvent
 
 from qv.core.window_settings import WindowSettings
 from qv.viewers.base_viewer import BaseViewer
 from qv.viewers.interactor_styles.mpr_interactor_style import MprInteractorStyle
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class WorldPosition:
+    """An anatomical point in source-world coordinates."""
+    x: float
+    y: float
+    z: float
+
+
+@dataclass(frozen=True, slots=True)
+class SyncRequest:
+    """
+    Immutable request passed from a viewer to the sync controller.
+
+    For phase 4, double click always asks for full slice synchoronization.
+    """
+    source_plane: "MprPlane"
+    world_position: WorldPosition
+    update_crosshair: bool
+    update_slices: bool
+    shift_pressed: bool = False
 
 
 class MprPlane(enum.Enum):
@@ -62,6 +85,7 @@ class MprViewer(BaseViewer):
     """2D MPR viewer."""
 
     sliceChanged = QtCore.Signal(object, int)
+    syncRequested = QtCore.Signal(object)
 
     def __init__(
             self,
@@ -106,6 +130,7 @@ class MprViewer(BaseViewer):
         self.delta_per_pixel: float = 1.0
 
         super().__init__(settings_manager, parent)
+        self.vtk_widget.installEventFilter(self)
 
         self._init_plane_overlay()
         self._init_crosshair_overlay()
@@ -126,6 +151,176 @@ class MprViewer(BaseViewer):
     def slice_index(self) -> int:
         """Return the current slice index."""
         return self._slice_index
+
+    @property
+    def image_data(self) -> vtk.vtkImageData | None:
+        """Expose loaded image  data for interactor-style checks."""
+        return self._image_data
+
+    def eventFilter(self, obj, event):
+        """
+        Convert a Qt double-click on the VTK widget into a sync request.
+
+        only a user double click emits a sync request, while controller-drive
+        slice updates never re-emit one.
+        """
+        if obj == self.vtk_widget and event.type() == QEvent.MouseButtonDblClick:
+            if event.button() == QtCore.Qt.LeftButton:
+                display_x = int(event.position().x())
+                display_y = int(event.position().y())
+                handled = self.request_sync_at_display_position(display_x, display_y)
+                if handled:
+                    return True
+        return super().eventFilter(obj, event)
+
+    def request_sync_at_display_position(self, display_x: int, display_y: int) -> bool:
+        """
+        Pick a world position from a display coordinate and emit a sync request.
+
+        Returns:
+            bool: True when a valid anatomical point was picked and emitted.
+        """
+        world_position = self.pick_world_position_from_display(display_x, display_y)
+        if world_position is None:
+            logger.debug(
+                "[MprViewer:%s] Double click ignored at display=(%d, %d).",
+                self._plane.value,
+                display_x,
+                display_y,
+            )
+            return False
+
+        request = SyncRequest(
+            source_plane=self._plane,
+            world_position=world_position,
+            update_crosshair=True,
+            update_slices=True,
+            shift_pressed=False,
+        )
+        logger.info(
+            "[MprViewer:%s] Sync request emitted at display=(%.3f, %.3f, %.3f).",
+            self._plane.value,
+            world_position.x,
+            world_position.y,
+            world_position.z,
+        )
+        self.syncRequested.emit(request)
+        return True
+
+    def pick_world_position_from_display(
+            self,
+            display_x: int,
+            display_y: int,
+    ) -> WorldPosition | None:
+        """
+        Convert a mouse display coordinate into source-world coordinates.
+
+        The picker operates in displayed slice coordinates, so the picked point
+        is converted back into the canonical source-world space before sync.
+        """
+        if self._image_actor is None or self._image_data is None:
+            return None
+
+        picker = vtk.vtkCellPicker()
+        picker.SetTolerance(0.0005)
+        picker.PickFromListOn()
+        picker.AddPickList(self._image_actor)
+
+        picked = picker.Pick(display_x, display_y, 0.0, self.renderer)
+        if picked == 0:
+            logger.debug("[MprViewer:%s] No pick found at display=(%d, %d).",
+                         self._plane.value, display_x, display_y)
+            return None
+
+        display_point = picker.GetPickPosition()
+        world_point = self._display_to_world_point(
+            (display_point[0], display_point[1], display_point[2])
+        )
+        if world_point is None:
+            return None
+
+        return WorldPosition(*world_point)
+
+    def world_to_slice_index(self, world_position: WorldPosition) -> int:
+        """
+        Convert a canonical world position to a slice index for this viewer.
+
+        The result is intentionally left unclamped here; `set_slice_index()`
+        remains the single place that clamps to the valid viewer range.
+        """
+        if self._image_data is None:
+            raise RuntimeError("Image data not loaded.")
+
+        origin = self._image_data.GetOrigin()
+        spacing = self._image_data.GetSpacing()
+        axis = PLANE_AXES_INDEX[self._plane]
+
+        axis_spacing = float(spacing[axis])
+        if abs(axis_spacing) < 1e-9:
+            raise RuntimeError(f"Invalid spacing for plane {self._plane.value}: {axis_spacing}.")
+
+        world_values = (
+            world_position.x,
+            world_position.y,
+            world_position.z,
+        )
+        return int(round((world_values[axis] - origin[axis]) / axis_spacing))
+
+    def _get_current_reslice_axes_components(
+            self,
+    ) -> tuple[tuple[float, float, float], tuple[float, float, float], tuple[float, float, float], tuple[float, float, float]] | None:
+        """
+        Return the active reslice basis vectors and origin.
+
+        The basis vectors come from PLANE_AXES and define how displayed slice
+        coordinates map into source-world coordinates.
+        """
+        if self._reslice is None or self._image_data is None:
+            return None
+
+        axes = PLANE_AXES[self._plane]
+        x_axis = (axes[0], axes[1], axes[2])
+        y_axis = (axes[3], axes[4], axes[5])
+        z_axis = (axes[6], axes[7], axes[8])
+
+        origin = self._reslice.GetResliceAxesOrigin()
+        if origin is None:
+            return None
+
+        return x_axis, y_axis, z_axis, (origin[0], origin[1], origin[2])
+
+    def _display_to_world_point(
+            self,
+            display_point: tuple[float, float, float],
+    ) -> tuple[float, float,  float] | None:
+        """
+        Convert a displayed slice-space point back into source-world coodinates.
+        """
+        axes_components = self._get_current_reslice_axes_components()
+        if axes_components is None:
+            return None
+
+        x_axis, y_axis, z_axis, origin = axes_components
+
+        world_x = (
+            origin[0]
+            + display_point[0] * x_axis[0]
+            + display_point[1] * y_axis[0]
+            + display_point[2] * z_axis[0]
+        )
+        world_y = (
+            origin[1]
+            + display_point[0] * x_axis[1]
+            + display_point[1] * y_axis[1]
+            + display_point[2] * z_axis[1]
+        )
+        world_z = (
+            origin[2]
+            + display_point[0] * x_axis[2]
+            + display_point[1] * y_axis[2]
+            + display_point[2] * z_axis[2]
+        )
+        return world_x, world_y, world_z
 
     def _init_plane_overlay(self) -> None:
         """Create a compact top-left overlay for the current plane."""
