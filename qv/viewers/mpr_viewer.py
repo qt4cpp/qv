@@ -221,23 +221,44 @@ class MprViewer(BaseViewer):
         if self._image_actor is None or self._image_data is None:
             return None
 
+        vtk_x, vtk_y = self._qt_to_vtk_display(display_x, display_y)
+
         picker = vtk.vtkCellPicker()
         picker.SetTolerance(0.0005)
         picker.PickFromListOn()
         picker.AddPickList(self._image_actor)
 
-        picked = picker.Pick(display_x, display_y, 0.0, self.renderer)
+        picked = picker.Pick(vtk_x, vtk_y, 0.0, self.renderer)
         if picked == 0:
-            logger.debug("[MprViewer:%s] No pick found at display=(%d, %d).",
-                         self._plane.value, display_x, display_y)
+            logger.debug(
+                "[MprViewer:%s] No pick found at qt=(%d, %d), vtk=(%d, %d).",
+                self._plane.value,
+                display_x,
+                display_y,
+                vtk_x,
+                vtk_y,
+            )
             return None
 
-        display_point = picker.GetPickPosition()
+        mapper_point = picker.GetMapperPosition()
         world_point = self._display_to_world_point(
-            (display_point[0], display_point[1], display_point[2])
+            (mapper_point[0], mapper_point[1], mapper_point[2]),
         )
         if world_point is None:
+            logger.debug(
+                "[MprViewer:%s] Invalid pick at display=(%d, %d).",
+                self._plane.value,
+                mapper_point,
+            )
             return None
+
+        logger.info(
+            "[MprViewer:%s] Pick qt=(%d, %d), vtk=(%d, %d) mapper=%s -> world=(%.3f, %.3f, %.3f).",
+            self._plane.value,
+            display_x, display_y,
+            mapper_point,
+            world_point[0], world_point[1], world_point[2],
+        )
 
         return WorldPosition(*world_point)
 
@@ -936,3 +957,37 @@ class MprViewer(BaseViewer):
         display_z = dx  * z_axis[0] + dy * z_axis[1] + dz * z_axis[2]
 
         return display_x, display_y, display_z
+
+    def _qt_to_vtk_display(
+            self,
+            display_x: int,
+            display_y: int,
+    ) -> tuple[int, int]:
+        """
+        Convert a Qt mouse position into VTK display coordinates.
+
+        Qt uses a top-left origin, while VtK picking expects a bottom-left origin.
+        This conversion is required before calling any VTK picker.
+        """
+        vtk_x = int(display_x)
+        vtk_y = int(self.vtk_widget.height() - 1 - display_y)
+
+        return vtk_x, vtk_y
+
+    def _get_reslice_axes_martix(self) -> vtk.vtkMatrix4x4 | None:
+        """
+        Return the actual reslice-axes matrix used by vtkImageReslice.
+
+        Phase 4 sync should rely on the matrix owned by VTK itself  rather than
+        re-deriving the transform from ``PLANE_AXES`` manually. That avoiods
+        row/column interpretation mistakes and keeps picking / crosshair math
+        consistent with the active pipeline.
+        """
+        if self._reslice is None:
+            return None
+
+        matrix = self._reslice.GetResliceAxes()
+        if matrix:
+            logger.debug("[MprViewer:%s] Reslice axes matrix: %s", self._plane.value, matrix)
+            return None
+        return matrix

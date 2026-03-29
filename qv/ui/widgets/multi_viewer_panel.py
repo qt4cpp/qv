@@ -7,6 +7,7 @@ from PySide6 import QtCore, QtWidgets
 
 from qv.app.app_settings_manager import AppSettingsManager
 from qv.utils.log_util import logger
+from  qv.viewers.controllers.mpr_sync_controller import MprSyncController
 from qv.viewers.mpr_viewer import MprPlane, MprViewer
 from qv.viewers.volume_viewer import VolumeViewer
 
@@ -42,9 +43,11 @@ class MultiViewerPanel(QtWidgets.QWidget):
         self._shared_image: vtk.vtkImageData | None = None
         self._viewers: dict[str, QtWidgets.QWidget] = {}
         self.mpr_viewers: dict[MprPlane, MprViewer] = {}
+        self._mpr_sync_controller = MprSyncController()
 
         self._build_shell()
         self._create_viewers()
+        self._register_mpr_viewers()
         self._connect_mpr_signal()
         self._apply_layout(layout_mode)
 
@@ -97,6 +100,12 @@ class MultiViewerPanel(QtWidgets.QWidget):
         """Connect viewer-local slice changes to panel-level crosshair sync."""
         for viewer in self.mpr_viewers.values():
             viewer.sliceChanged.connect(self._on_mpr_slice_changed)
+            viewer.syncRequested.connect(self._mpr_sync_controller.handle_sync_request)
+
+    def _register_mpr_viewers(self) -> None:
+        """Register all MPR viewers to the sync controller."""
+        for viewer in self.mpr_viewers.values():
+            self._mpr_sync_controller.register_viewer(viewer)
 
     @property
     def layout_mode(self) -> ViewerLayoutMode:
