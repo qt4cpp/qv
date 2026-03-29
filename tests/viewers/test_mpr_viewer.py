@@ -6,7 +6,7 @@ import pytest
 from PySide6 import QtWidgets
 
 from qv.core.window_settings import WindowSettings
-from qv.viewers.mpr_viewer import MprPlane, MprViewer
+from qv.viewers.mpr_viewer import MprPlane, MprViewer, SyncRequest, WorldPosition
 
 
 def test_mpr_viewer_fixture_creates_widget(mpr_viewer):
@@ -263,7 +263,7 @@ def test_crosshair_segments_are_absent_until_both_references_exist(
     assert mpr_viewer._build_crosshair_segments() is None
 
 
-def test_test_crosshair_slice_reference_ignores_own_plane(
+def test_crosshair_slice_reference_ignores_own_plane(
         mpr_viewer, sample_image_data
 ):
     mpr_viewer.set_image_data(sample_image_data)
@@ -271,3 +271,41 @@ def test_test_crosshair_slice_reference_ignores_own_plane(
     mpr_viewer.set_crosshair_slice_reference(MprPlane.AXIAL, 99, render=False)
 
     assert mpr_viewer._crosshair_slice_refs[MprPlane.AXIAL] is None
+
+
+def test_world_to_slice_index_uses_viewer_plane_axis(mpr_viewer, sample_image_data):
+    """
+    The viewer should convert a canonical world point inti a local slice index
+    using its own plane axis.
+    """
+    mpr_viewer.set_image_data(sample_image_data)
+
+    assert mpr_viewer.world_to_slice_index(WorldPosition(x=-9.3, y=-18.4, z=0.0)) == 2
+
+
+def test_request_sync_at_display_position_emits_sync_request(
+        mpr_viewer,
+        qtbot,
+        monkeypatch,
+) -> None:
+    """
+    Double-click sync should emit a full slice-sync request when picking succeeds.
+    """
+    picked_world = WorldPosition(x=1.5, y=2.5, z=3.5)
+    monkeypatch.setattr(
+        mpr_viewer,
+        "pick_world_position_from_display",
+        lambda x, y: picked_world,
+    )
+
+    with qtbot.waitSignal(mpr_viewer.syncRequested, timeout=1000) as blocker:
+        handled = mpr_viewer.request_sync_at_display_position(120, 80)
+
+    assert handled is True
+    request = blocker.args[0]
+    assert isinstance(request, SyncRequest)
+    assert request.source_plane == MprPlane.AXIAL
+    assert request.world_position == picked_world
+    assert request.update_crosshair is True
+    assert request.update_slices is True
+    assert request.shift_pressed is False
