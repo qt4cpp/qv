@@ -23,6 +23,9 @@ class MprInteractorStyle(vtkInteractorStyleImage):
         self._mode: str | None = None
         self._last_pos: tuple[int, int] | None = None
 
+        self.AddObserver("LeftButtonPressEvent", self._on_left_button_down)
+        self.AddObserver("LeftButtonReleaseEvent", self._on_left_button_up)
+
         self.AddObserver("RightButtonPressEvent", self.on_right_button_down)
         self.AddObserver("RightButtonReleaseEvent", self.on_right_button_up)
         self.AddObserver("MouseMoveEvent", self.on_mouse_move)
@@ -36,6 +39,43 @@ class MprInteractorStyle(vtkInteractorStyleImage):
     def _has_window_settings(self) -> bool:
         """Return True when the viewer has window/level settings."""
         return getattr(self._viewer, "window_settings", None) is not None
+
+    def _vtk_to_qt_position(self, vtk_x: int, vtk_y: int) -> tuple[int, int]:
+        """Convert VTK coordinates to Qt coordinates."""
+        iren = self.GetInteractor()
+        return (
+            vtk_x - iren.GetRenderWindow().GetPosition()[0],
+            vtk_y - iren.GetRenderWindow().GetPosition()[1],
+        )
+
+    def _on_left_button_down(self, obj, event) -> None:
+        """
+        Start a Shift-drag synchronization when possible.
+
+        Normal left-button behavior is preserved unless Shift is pressed while
+        valid image data is loaded.
+        """
+        iren = self.GetInteractor()
+        if iren.GetShiftKey() and self._has_loaded_image():
+            self._last_pos = iren.GetEventPosition()
+            self._mode = 'sync-drag'
+
+            x, y = self._last_pos
+            self._viewer.request_sync_at_display_position(
+                x, y, shift_pressed=True,
+            )
+            return
+
+        self.OnLeftButtonDown()
+
+    def _on_left_button_up(self, obj, event) -> None:
+        """Finish Shift-drag synchronization if it is active."""
+        if self._mode == 'sync-drag':
+            self._mode = None
+            self._last_pos = None
+            return
+
+        self.OnLeftButtonUp()
 
     def on_right_button_down(self, obj, event) -> None:
         """
@@ -62,6 +102,21 @@ class MprInteractorStyle(vtkInteractorStyleImage):
 
         Outside drag mode, fall back to the default image-style behavior.
         """
+        if self._mode == 'sync-drag':
+            iren = self.GetInteractor()
+            x, y = iren.GetEventPosition()
+
+            if self._last_pos == (x, y):
+                return
+
+            self._viewer.request_sync_at_display_position(
+                x,
+                y,
+                shift_pressed=True,
+            )
+            self._last_pos = (x, y)
+            return
+
         if self._mode != 'ww/wl' or self._last_pos is None:
             self.OnMouseMove()
             return

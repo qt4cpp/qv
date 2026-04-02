@@ -309,3 +309,32 @@ def test_request_sync_at_display_position_emits_sync_request(
     assert request.update_crosshair is True
     assert request.update_slices is True
     assert request.shift_pressed is False
+
+
+def test_request_sync_at_display_position_emits_shift_drag_sync_request(
+        mpr_viewer,
+        qtbot,
+        monkeypatch,
+) -> None:
+    """
+    Shift-drag sync should emit a continuous SyncRequest with the modifier flag.
+    """
+    picked_world = WorldPosition(x=4.0, y=5.0, z=6.0)
+    monkeypatch.setattr(
+        mpr_viewer,
+        "pick_world_position_from_display",
+        lambda x, y: picked_world,
+    )
+
+    with qtbot.waitSignal(mpr_viewer.syncRequested, timeout=1000) as blocker:
+        handled = mpr_viewer.request_sync_at_display_position(
+            25, 35, shift_pressed=True)
+
+        assert handled is True
+        request = blocker.args[0]
+        assert isinstance(request, SyncRequest)
+        assert request.source_plane == MprPlane.AXIAL
+        assert request.world_position == picked_world
+        assert request.update_crosshair is True
+        assert request.update_slices is True
+        assert request.shift_pressed is True

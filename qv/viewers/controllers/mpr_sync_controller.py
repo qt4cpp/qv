@@ -11,11 +11,12 @@ class MprSyncController:
     """
     Controller responsible for applying synchronization requests across MPR viewers.
 
-    Phase 4 scope:
-    - accept a double-click driven SyncRequest
+    Phase 5 scope:
+    - accept one-shot sync requests from double click
+    - accept continuous sync requests from Shift-drag
     - convert the requested world position into each viewer's slice index
-    - update all viewers once
-    - avoid recursive re-entry while a sync is already runnning.
+    - update all viewers once per request
+    - avoid recursive re-entry while a sync is already running.
     """
 
     def __init__(self) -> None:
@@ -40,8 +41,10 @@ class MprSyncController:
 
         self._is_syncing = True
         try:
+            request_kind = "shift-drag" if request.shift_pressed else "double-click"
             logger.info(
                 "[MprSyncController] Sync from %s at world=(%.3f, %.3f, %.3f).",
+                request_kind,
                 request.source_plane.value,
                 request.world_position.x,
                 request.world_position.y,
@@ -58,6 +61,7 @@ class MprSyncController:
                     "[MprSyncController] plane=%s, target_slice=%d",
                     plane.value,
                     target_index,
+                    request_kind,
                 )
                 viewer.set_slice_index(target_index)
         finally:

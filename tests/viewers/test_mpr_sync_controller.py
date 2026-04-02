@@ -69,3 +69,32 @@ def test_sync_controller_skips_unloaded_viewers() -> None:
 
     assert loaded.received_indices == [7]
     assert unloaded.received_indices == []
+
+
+def test_sync_controller_accepts_shift_drag_requests() -> None:
+    """
+    Phase 5 should treat Shift-drag as a continuous variant of the same sync flow.
+    """
+    controller = MprSyncController()
+
+    axial = ViewerSpy(MprPlane.AXIAL, target_index=3)
+    coronal = ViewerSpy(MprPlane.CORONAL, target_index=4)
+    sagittal = ViewerSpy(MprPlane.SAGITTAL, target_index=5)
+
+    controller.register_viewer(axial)
+    controller.register_viewer(coronal)
+    controller.register_viewer(sagittal)
+
+    request = SyncRequest(
+        source_plane=MprPlane.AXIAL,
+        world_position=WorldPosition(x=10.0, y=20.0, z=30.0),
+        update_crosshair=True,
+        update_slices=True,
+        shift_pressed=True,
+    )
+
+    controller.handle_sync_request(request)
+
+    assert axial.received_indices == [3]
+    assert coronal.received_indices == [4]
+    assert sagittal.received_indices == [5]

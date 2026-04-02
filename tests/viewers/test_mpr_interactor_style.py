@@ -26,6 +26,7 @@ class ViewerSpy:
         )
         self.adjust_calls: list[tuple[int, int]] = []
         self.scroll_calls: list[int] = []
+        self.sync_calls: list[tuple[int, int, bool]] = []
 
     def adjust_window_settings(self, dx: int, dy: int) -> None:
         """Record WW/WL adjustments requests."""
@@ -35,13 +36,29 @@ class ViewerSpy:
         """Record slice scrolling requests."""
         self.scroll_calls.append(delta)
 
+    def request_sync_at_display_position(
+            self,
+            display_x: int,
+            display_y: int,
+            *,
+            shift_pressed: bool = False,
+    ) -> None:
+        """Record Shift-drag sync requests."""
+        self.sync_calls.append((display_x, display_y, shift_pressed))
+        return True
+
 
 class FakeInteractor:
     """Simple interactor stub that returns a scripted sequence of positions."""
 
-    def __init__(self, positions: list[tuple[int, int]]) -> None:
+    def __init__(self,
+                 positions: list[tuple[int, int]],
+                 *,
+                 shift_key: bool = False
+     ) -> None:
         self._positions = positions
         self._index = 0
+        self._shift_key = shift_key
 
     def GetEventPosition(self) -> tuple[int, int]:
         """Return the next scripted cursor position."""
@@ -51,6 +68,10 @@ class FakeInteractor:
         pos = self._positions[min(self._index, len(self._positions) - 1)]
         self._index += 1
         return pos
+
+    def GetShiftKey(self) -> int:
+        """Return 1 when Shift is pressed, matching the VTK API shape."""
+        return 1 if self._shift_key else 0
 
 
 @pytest.fixture
@@ -174,3 +195,31 @@ def test_right_button_release_finishes_drag_and_stops_followup_adjustments(
     assert loaded_viewer.adjust_calls == [(5, 10)]
     assert style._mode is None
     assert style._last_pos is None
+
+
+def test_shift_left_button_press_starts_sync_drag_and_emits_initial_sync(
+        loaded_viewer: ViewerSpy,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Shift + left press should enter sync-drag mode and emit one initial request.
+
+    Emitting immediately makes the first drag position deterministic instead of
+    waiting for the next mouse-move event.
+    """
+    style = MprInteractorStyle(loaded_viewer)
+    fake_interactor = FakeInteractor([(50, 60)], shift_key=True)
+
+    monkeypatch.setattr(MprInteractorStyle, "GetInteractor", lambda self: fake_interactor)
+    monkeypatch.setattr(MprInteractorStyle, "OnLeftButtonDown", lambda self: None)
+
+    style.on_left_button_down(None, None)
+
+    assert style._mode == "sync-drag"
+    assert style._last_pos == (50, 60)
+    assert loaded_viewer.sync_calls == [(50, 60, True)]
+
+def test_shift_drag_mouse_move_continuously_requests_sync(
+        loaded_viewer: ViewerSpy,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:

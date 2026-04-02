@@ -28,7 +28,9 @@ class SyncRequest:
     """
     Immutable request passed from a viewer to the sync controller.
 
-    For phase 4, double click always asks for full slice synchoronization.
+    `Shift_pressed=True` marks a continuous drag-sync request.
+    `Shift-pressed=False` marks an explicit point-sync request such as a
+    double click.
     """
     source_plane: "MprPlane"
     world_position: WorldPosition
@@ -161,32 +163,42 @@ class MprViewer(BaseViewer):
         """
         Convert a Qt double-click on the VTK widget into a sync request.
 
-        only a user double click emits a sync request, while controller-drive
-        slice updates never re-emit one.
+        Phase 5 keeps the semantics explicit:
+        - double click -> one-shot full sync
+        - Shift-drag -> continuous sync driven by the interactor style
         """
         if obj == self.vtk_widget and event.type() == QEvent.MouseButtonDblClick:
             if event.button() == QtCore.Qt.LeftButton:
                 display_x = int(event.position().x())
                 display_y = int(event.position().y())
-                handled = self.request_sync_at_display_position(display_x, display_y)
+                handled = self.request_sync_at_display_position(
+                    display_x, display_y, shift_pressed=False)
                 if handled:
                     return True
         return super().eventFilter(obj, event)
 
-    def request_sync_at_display_position(self, display_x: int, display_y: int) -> bool:
+    def request_sync_at_display_position(
+            self,
+            display_x: int,
+            display_y: int,
+            *,
+            shift_pressed: bool = False,
+    ) -> bool:
         """
         Pick a world position from a display coordinate and emit a sync request.
 
-        Returns:
-            bool: True when a valid anatomical point was picked and emitted.
+        This method is shared by:
+        - double click: one-shot synchronization
+        - Shift-drag: continuous synchronization while the pointer moves
         """
         world_position = self.pick_world_position_from_display(display_x, display_y)
         if world_position is None:
             logger.debug(
-                "[MprViewer:%s] Double click ignored at display=(%d, %d).",
+                "[MprViewer:%s] Double click ignored at display=(%d, %d), shift=%s.",
                 self._plane.value,
                 display_x,
                 display_y,
+                shift_pressed,
             )
             return False
 
@@ -195,14 +207,15 @@ class MprViewer(BaseViewer):
             world_position=world_position,
             update_crosshair=True,
             update_slices=True,
-            shift_pressed=False,
+            shift_pressed=shift_pressed,
         )
         logger.info(
-            "[MprViewer:%s] Sync request emitted at display=(%.3f, %.3f, %.3f).",
+            "[MprViewer:%s] Sync request emitted at display=(%.3f, %.3f, %.3f), shift=%s.",
             self._plane.value,
             world_position.x,
             world_position.y,
             world_position.z,
+            shift_pressed,
         )
         self.syncRequested.emit(request)
         return True
