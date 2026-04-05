@@ -6,6 +6,8 @@ from typing import Protocol
 
 from vtkmodules.vtkInteractionStyle import vtkInteractorStyleImage
 
+from qv.viewers.coordinates import VtkDisplayPoint
+
 
 class MprInteractorStyle(vtkInteractorStyleImage):
     """
@@ -61,8 +63,9 @@ class MprInteractorStyle(vtkInteractorStyleImage):
             self._mode = 'sync-drag'
 
             x, y = self._last_pos
-            self._viewer.request_sync_at_display_position(
-                x, y, shift_pressed=True,
+            self._viewer.request_sync_at_vtk_position(
+                VtkDisplayPoint(x=x, y=y),
+                shift_pressed=True,
             )
             return
 
@@ -109,9 +112,8 @@ class MprInteractorStyle(vtkInteractorStyleImage):
             if self._last_pos == (x, y):
                 return
 
-            self._viewer.request_sync_at_display_position(
-                x,
-                y,
+            self._viewer.request_sync_at_vtk_position(
+                VtkDisplayPoint(x=x, y=y),
                 shift_pressed=True,
             )
             self._last_pos = (x, y)
@@ -124,7 +126,7 @@ class MprInteractorStyle(vtkInteractorStyleImage):
         iren = self.GetInteractor()
         x, y = iren.GetEventPosition()
         lx, ly = self._last_pos
-        dx, dy = x -lx, y - ly
+        dx, dy = x - lx, y - ly
 
         if dx == 0 and dy == 0:
             return

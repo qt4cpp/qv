@@ -10,6 +10,7 @@ from PySide6.QtCore import QEvent
 
 from qv.core.window_settings import WindowSettings
 from qv.viewers.base_viewer import BaseViewer
+from qv.viewers.coordinates import QtDisplayPoint, VtkDisplayPoint, qt_to_vtk_display
 from qv.viewers.interactor_styles.mpr_interactor_style import MprInteractorStyle
 
 logger = logging.getLogger(__name__)
@@ -169,18 +170,20 @@ class MprViewer(BaseViewer):
         """
         if obj == self.vtk_widget and event.type() == QEvent.MouseButtonDblClick:
             if event.button() == QtCore.Qt.LeftButton:
-                display_x = int(event.position().x())
-                display_y = int(event.position().y())
                 handled = self.request_sync_at_display_position(
-                    display_x, display_y, shift_pressed=False)
+                    QtDisplayPoint(
+                        x=int(event.position().x()),
+                        y=int(event.position().y()),
+                    ),
+                    shift_pressed=False,
+                )
                 if handled:
                     return True
         return super().eventFilter(obj, event)
 
-    def request_sync_at_display_position(
+    def request_sync_at_qt_position(
             self,
-            display_x: int,
-            display_y: int,
+            point: QtDisplayPoint,
             *,
             shift_pressed: bool = False,
     ) -> bool:
@@ -191,13 +194,38 @@ class MprViewer(BaseViewer):
         - double click: one-shot synchronization
         - Shift-drag: continuous synchronization while the pointer moves
         """
-        world_position = self.pick_world_position_from_display(display_x, display_y)
+        world_position = self.pick_world_position_from_qt_display(point)
+        return self._emit_sync_request(
+            world_position=world_position,
+            shift_pressed=shift_pressed,
+            source_label=f"qt=({point.x}, {point.y})",
+        )
+
+    def request_sync_at_vtk_position(
+            self,
+            point: VtkDisplayPoint,
+            *,
+            shift_pressed: bool = False,
+    ):
+        world_position = self.pick_world_position_from_vtk_display(point)
+        return self._emit_sync_request(
+            world_position=world_position,
+            shift_pressed=shift_pressed,
+            source_label=f"vtk=({point.x}, {point.y})",
+        )
+
+    def _emit_sync_request(
+            self,
+            *,
+            world_position: WorldPosition | None,
+            shift_pressed: bool,
+            source_label: str,
+    ) -> bool:
         if world_position is None:
             logger.debug(
-                "[MprViewer:%s] Double click ignored at display=(%d, %d), shift=%s.",
+                "[MprViewer:%s] Sync ignored at %s, shift=%s",
                 self._plane.value,
-                display_x,
-                display_y,
+                source_label,
                 shift_pressed,
             )
             return False
@@ -209,21 +237,19 @@ class MprViewer(BaseViewer):
             update_slices=True,
             shift_pressed=shift_pressed,
         )
-        logger.info(
-            "[MprViewer:%s] Sync request emitted at display=(%.3f, %.3f, %.3f), shift=%s.",
-            self._plane.value,
-            world_position.x,
-            world_position.y,
-            world_position.z,
-            shift_pressed,
-        )
         self.syncRequested.emit(request)
         return True
 
-    def pick_world_position_from_display(
+    def pick_world_position_from_qt_display(
             self,
-            display_x: int,
-            display_y: int,
+            point: QtDisplayPoint,
+    ) -> WorldPosition | None:
+        vtk_point = qt_to_vtk_display(point, widget_height=self._widget.height())
+        return self.pick_world_position_from_vtk_display(vtk_point)
+
+    def pick_world_position_from_vtk_display(
+            self,
+            point: VtkDisplayPoint,
     ) -> WorldPosition | None:
         """
         Convert a mouse display coordinate into source-world coordinates.
@@ -234,22 +260,18 @@ class MprViewer(BaseViewer):
         if self._image_actor is None or self._image_data is None:
             return None
 
-        vtk_x, vtk_y = self._qt_to_vtk_display(display_x, display_y)
-
         picker = vtk.vtkCellPicker()
         picker.SetTolerance(0.0005)
         picker.PickFromListOn()
         picker.AddPickList(self._image_actor)
 
-        picked = picker.Pick(vtk_x, vtk_y, 0.0, self.renderer)
+        picked = picker.Pick(point.x, point.y, 0.0, self.renderer)
         if picked == 0:
             logger.debug(
-                "[MprViewer:%s] No pick found at qt=(%d, %d), vtk=(%d, %d).",
+                "[MprViewer:%s] No pick found at qt=(%d, %d).",
                 self._plane.value,
-                display_x,
-                display_y,
-                vtk_x,
-                vtk_y,
+                point.x,
+                point.y
             )
             return None
 
@@ -264,14 +286,6 @@ class MprViewer(BaseViewer):
                 mapper_point,
             )
             return None
-
-        logger.info(
-            "[MprViewer:%s] Pick qt=(%d, %d), vtk=(%d, %d) mapper=%s -> world=(%.3f, %.3f, %.3f).",
-            self._plane.value,
-            display_x, display_y,
-            mapper_point,
-            world_point[0], world_point[1], world_point[2],
-        )
 
         return WorldPosition(*world_point)
 
