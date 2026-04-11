@@ -170,7 +170,7 @@ class MprViewer(BaseViewer):
         """
         if obj == self.vtk_widget and event.type() == QEvent.MouseButtonDblClick:
             if event.button() == QtCore.Qt.LeftButton:
-                handled = self.request_sync_at_display_position(
+                handled = self.request_sync_at_qt_position(
                     QtDisplayPoint(
                         x=int(event.position().x()),
                         y=int(event.position().y()),
@@ -206,7 +206,7 @@ class MprViewer(BaseViewer):
             point: VtkDisplayPoint,
             *,
             shift_pressed: bool = False,
-    ):
+    ) -> bool:
         world_position = self.pick_world_position_from_vtk_display(point)
         return self._emit_sync_request(
             world_position=world_position,

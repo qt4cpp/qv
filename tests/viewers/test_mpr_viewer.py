@@ -6,6 +6,7 @@ import pytest
 from PySide6 import QtWidgets
 
 from qv.core.window_settings import WindowSettings
+from qv.viewers.coordinates import QtDisplayPoint
 from qv.viewers.mpr_viewer import MprPlane, MprViewer, SyncRequest, WorldPosition
 
 
@@ -283,7 +284,7 @@ def test_world_to_slice_index_uses_viewer_plane_axis(mpr_viewer, sample_image_da
     assert mpr_viewer.world_to_slice_index(WorldPosition(x=-9.3, y=-18.4, z=0.0)) == 2
 
 
-def test_request_sync_at_display_position_emits_sync_request(
+def test_request_sync_at_qt_position_emits_sync_request(
         mpr_viewer,
         qtbot,
         monkeypatch,
@@ -295,11 +296,13 @@ def test_request_sync_at_display_position_emits_sync_request(
     monkeypatch.setattr(
         mpr_viewer,
         "pick_world_position_from_display",
-        lambda x, y: picked_world,
+        lambda point: picked_world,
     )
 
     with qtbot.waitSignal(mpr_viewer.syncRequested, timeout=1000) as blocker:
-        handled = mpr_viewer.request_sync_at_display_position(120, 80)
+        handled = mpr_viewer.request_sync_at_qt_position(
+            QtDisplayPoint(120, 80)
+        )
 
     assert handled is True
     request = blocker.args[0]
@@ -311,7 +314,7 @@ def test_request_sync_at_display_position_emits_sync_request(
     assert request.shift_pressed is False
 
 
-def test_request_sync_at_display_position_emits_shift_drag_sync_request(
+def test_request_sync_at_qt_position_emits_shift_drag_sync_request(
         mpr_viewer,
         qtbot,
         monkeypatch,
@@ -322,13 +325,15 @@ def test_request_sync_at_display_position_emits_shift_drag_sync_request(
     picked_world = WorldPosition(x=4.0, y=5.0, z=6.0)
     monkeypatch.setattr(
         mpr_viewer,
-        "pick_world_position_from_display",
-        lambda x, y: picked_world,
+        "pick_world_position_from_qt_display",
+        lambda point: picked_world,
     )
 
     with qtbot.waitSignal(mpr_viewer.syncRequested, timeout=1000) as blocker:
-        handled = mpr_viewer.request_sync_at_display_position(
-            25, 35, shift_pressed=True)
+        handled = mpr_viewer.request_sync_at_qt_position(
+            QtDisplayPoint(x=25, y=35),
+            shift_pressed=True,
+        )
 
         assert handled is True
         request = blocker.args[0]
