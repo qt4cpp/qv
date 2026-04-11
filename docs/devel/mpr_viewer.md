@@ -204,11 +204,88 @@ VolumeViewer.load_volume()
 
 ---
 
-## 今後の拡張（Phase 2）
+## 断面表示規約（暫定）
 
-- `MultiViewerPanel` でのレイアウト統合
-- Sagittal / Coronal パネルの追加（4画面構成）
-- MPR 側での独立した Window/Level 操作
-- クロスライン（他断面の断面位置表示）
-- DICOM orientation 対応（patient matrix の反映）
-```
+将来の `Patient Orientation` 対応および断面表示の一貫性確保のため、  
+現時点で以下の表示規約を採用する。
+
+### Axial
+
+- 足側から頭側方向を見る
+- 患者の右は画面の左に表示する
+- 患者の左は画面の右に表示する
+
+### Coronal
+
+- 患者の前方から後方を見る
+- 患者の右は画面の左に表示する
+- 患者の左は画面の右に表示する
+
+### Sagittal
+
+- 患者の左側から右側方向を見る
+- 画面の左を患者の前方とする
+- 画面の右を患者の後方とする
+
+## この規約の意図
+
+- 3断面で左右・前後・上下の解釈を一貫させる
+- 現段階の固定3断面実装において、viewer ごとの見え方を安定させる
+- 将来 `Patient Orientation` に対応した際も、表示ポリシーを維持できるようにする
+
+## 現段階での位置づけ
+
+この規約は「最終的な DICOM orientation 対応」そのものではない。  
+まず viewer が従う表示ポリシーを明確化し、その後に各データセットの患者座標系を  
+この表示規約へ正規化する、という順序で実装する。
+
+## 将来対応で決めること
+
+以下は今後、`Patient Orientation` 対応時に明示的に仕様化する必要がある。
+
+### 1. 患者座標系の正規化方針
+
+- DICOM の `Image Orientation (Patient)` をどのように取り込むか
+- `vtkImageData` の index space から patient space への変換をどこで保持するか
+- viewer 内部の正本座標を何にするか
+  - voxel index
+  - world coordinate
+  - patient coordinate
+
+### 2. 表示規約へのマッピング方法
+
+- patient 座標系から Axial / Coronal / Sagittal の各表示面へどう変換するか
+- 各 plane ごとに必要な軸反転をどこで吸収するか
+  - `PLANE_AXES`
+  - camera の `view_up`
+  - actor 側の transform
+- radiological convention を維持するかどうか
+
+### 3. Orientation marker 表示
+
+- 画面端に表示する方位記号
+  - `L / R`
+  - `A / P`
+  - `H / F`
+- plane ごとにどの位置へ何を表示するか
+- patient orientation 対応後に常に正しい marker を出す方法
+
+### 4. Crosshair と同期座標の扱い
+
+- crosshair の正本を patient/world 座標に統一するか
+- `WorldPosition` を patient 座標として扱うか
+- 他断面への投影時にどの変換行列を使うか
+
+### 5. 将来拡張時の整合
+
+- oblique MPR を導入した場合の表示規約
+- thick slab 時の orientation 維持
+- 同一 plane を複数 viewer で表示する場合の規約
+- 画面レイアウト変更時にも表示規約を不変に保つ方法
+
+## 実装上の指針
+
+- 現段階では固定 plane ごとの表示向きを崩さない
+- 一時的な見た目調整ではなく、上記規約に従って `PLANE_AXES` と camera を設計する
+- `Patient Orientation` 対応時には、この表示規約を変更するのではなく、
+  患者座標系をこの規約へマッピングする形で実装する
