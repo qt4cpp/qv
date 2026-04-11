@@ -71,7 +71,7 @@ class FakeMprViewer(QtWidgets.QWidget):
         if render:
             self.update_view()
 
-    def clear_crosshair_references(self, *, render: bool = True) -> None:
+    def clear_crosshair_reference(self, *, render: bool = True) -> None:
         self.crosshair_refs.clear()
         if render:
             self.update_view()

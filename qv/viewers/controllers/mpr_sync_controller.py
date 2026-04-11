@@ -58,7 +58,7 @@ class MprSyncController:
 
                 target_index = viewer.world_to_slice_index(request.world_position)
                 logger.debug(
-                    "[MprSyncController] plane=%s, target_slice=%d",
+                    "[MprSyncController] plane=%s, target_slice=%d, request_kind=%s",
                     plane.value,
                     target_index,
                     request_kind,

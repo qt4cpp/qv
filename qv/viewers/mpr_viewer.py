@@ -244,7 +244,7 @@ class MprViewer(BaseViewer):
             self,
             point: QtDisplayPoint,
     ) -> WorldPosition | None:
-        vtk_point = qt_to_vtk_display(point, widget_height=self._widget.height())
+        vtk_point = qt_to_vtk_display(point, widget_height=self.vtk_widget.height())
         return self.pick_world_position_from_vtk_display(vtk_point)
 
     def pick_world_position_from_vtk_display(
@@ -483,11 +483,6 @@ class MprViewer(BaseViewer):
         logger.debug("WL/WW map applied: %.1f, %.1f",
                      self._wl_map.GetLevel(), self._wl_map.GetWindow())
         return True
-
-    @property
-    def image_data(self) -> vtk.vtkImageData | None:
-        """Expose loaded image  data for interactor-style checks."""
-        return self._image_data
 
     def _get_scalar_range(self) -> tuple[float, float] | None:
         """Return the current scalar range when image data is loaded."""
@@ -867,7 +862,6 @@ class MprViewer(BaseViewer):
         if self._image_data is None:
             return None
 
-
         display_bounds = self._get_display_bounds()
         if display_bounds is None:
             logger.debug("[MprViewer:%s] Display bounds is None, skipping crosshair rendering.",
@@ -880,20 +874,20 @@ class MprViewer(BaseViewer):
                          self._plane.value)
             return None
 
-        corsshair_display = self._world_to_display_point(crosshair_world)
-        if crosshair_world is None:
+        crosshair_display = self._world_to_display_point(crosshair_world)
+        if crosshair_display is None:
             logger.debug("[MprViewer:%s] Crosshair display position is None, skipping crosshair rendering.",
                          self._plane.value)
             return None
 
-        display_x, display_y, display_z = corsshair_display
+        display_x, display_y, display_z = crosshair_display
         plane_z = 0.5 * (display_bounds[4] + display_bounds[5])
 
         logger.debug(
             "[MprViewer:%s] Crosshair world=%s display=%s bounds=%s)",
             self._plane.value,
             crosshair_world,
-            corsshair_display,
+            crosshair_display,
             display_bounds,
         )
 
@@ -935,30 +929,6 @@ class MprViewer(BaseViewer):
         if render:
             self.update_view()
 
-    def _get_current_reslice_axes_components(
-            self,
-    ) -> tuple[tuple[float, float, float], tuple[float, float, float], tuple[float, float, float]] | None:
-        """
-        Return the active reslice basis vectors and origin.
-
-        The basis vectors come  from PLANE_AXES and define how displayed slice
-        coodinates map into source-world coordinates.
-        """
-        if self._reslice is None or self._image_data is None:
-            return None
-
-        axes = PLANE_AXES[self._plane]
-        x_axis = (axes[0], axes[1], axes[2])
-        y_axis = (axes[3], axes[4], axes[5])
-        z_axis = (axes[6], axes[7], axes[8])
-
-        origin = self._reslice.GetResliceAxesOrigin()
-
-        if origin is None:
-            return None
-
-        return x_axis, y_axis, z_axis, (origin[0], origin[1], origin[2])
-
     def _world_to_display_point(
             self,
             world_point: tuple[float, float, float],
@@ -984,37 +954,3 @@ class MprViewer(BaseViewer):
         display_z = dx  * z_axis[0] + dy * z_axis[1] + dz * z_axis[2]
 
         return display_x, display_y, display_z
-
-    def _qt_to_vtk_display(
-            self,
-            display_x: int,
-            display_y: int,
-    ) -> tuple[int, int]:
-        """
-        Convert a Qt mouse position into VTK display coordinates.
-
-        Qt uses a top-left origin, while VtK picking expects a bottom-left origin.
-        This conversion is required before calling any VTK picker.
-        """
-        vtk_x = int(display_x)
-        vtk_y = int(self.vtk_widget.height() - 1 - display_y)
-
-        return vtk_x, vtk_y
-
-    def _get_reslice_axes_martix(self) -> vtk.vtkMatrix4x4 | None:
-        """
-        Return the actual reslice-axes matrix used by vtkImageReslice.
-
-        Phase 4 sync should rely on the matrix owned by VTK itself  rather than
-        re-deriving the transform from ``PLANE_AXES`` manually. That avoiods
-        row/column interpretation mistakes and keeps picking / crosshair math
-        consistent with the active pipeline.
-        """
-        if self._reslice is None:
-            return None
-
-        matrix = self._reslice.GetResliceAxes()
-        if matrix:
-            logger.debug("[MprViewer:%s] Reslice axes matrix: %s", self._plane.value, matrix)
-            return None
-        return matrix
