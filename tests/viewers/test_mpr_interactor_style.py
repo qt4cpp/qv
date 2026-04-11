@@ -6,6 +6,7 @@ import pytest
 
 from qv.core.window_settings import WindowSettings
 from qv.viewers.interactor_styles.mpr_interactor_style import MprInteractorStyle
+from qv.viewers.coordinates import VtkDisplayPoint
 
 
 class ViewerSpy:
@@ -36,15 +37,14 @@ class ViewerSpy:
         """Record slice scrolling requests."""
         self.scroll_calls.append(delta)
 
-    def request_sync_at_display_position(
+    def request_sync_at_vtk_position(
             self,
-            display_x: int,
-            display_y: int,
+            point: VtkDisplayPoint,
             *,
             shift_pressed: bool = False,
-    ) -> None:
+    ) -> bool:
         """Record Shift-drag sync requests."""
-        self.sync_calls.append((display_x, display_y, shift_pressed))
+        self.sync_calls.append((point.x, point.y, shift_pressed))
         return True
 
 
@@ -223,3 +223,24 @@ def test_shift_drag_mouse_move_continuously_requests_sync(
         loaded_viewer: ViewerSpy,
         monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    style = MprInteractorStyle(loaded_viewer)
+    fake_interactor = FakeInteractor(
+        [(50, 60), (50, 60), (54, 63), (70, 90)],
+        shift_key=True,
+    )
+
+    monkeypatch.setattr(MprInteractorStyle, "GetInteractor", lambda self: fake_interactor)
+    monkeypatch.setattr(MprInteractorStyle, "OnLeftButtonDown", lambda self: None)
+    monkeypatch.setattr(MprInteractorStyle, "OnMouseMove", lambda self: None)
+
+    style.on_left_button_down(None, None)
+    style.on_mouse_move(None, None)
+    style.on_mouse_move(None, None)
+    style.on_mouse_move(None, None)
+
+    assert loaded_viewer.sync_calls == [
+        (50, 60, True),
+        (54, 63, True),
+        (70, 90, True),
+    ]
+    assert style._last_pos == (70, 90)

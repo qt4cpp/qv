@@ -25,9 +25,8 @@ class MprInteractorStyle(vtkInteractorStyleImage):
         self._mode: str | None = None
         self._last_pos: tuple[int, int] | None = None
 
-        self.AddObserver("LeftButtonPressEvent", self._on_left_button_down)
-        self.AddObserver("LeftButtonReleaseEvent", self._on_left_button_up)
-
+        self.AddObserver("LeftButtonPressEvent", self.on_left_button_down)
+        self.AddObserver("LeftButtonReleaseEvent", self.on_left_button_up)
         self.AddObserver("RightButtonPressEvent", self.on_right_button_down)
         self.AddObserver("RightButtonReleaseEvent", self.on_right_button_up)
         self.AddObserver("MouseMoveEvent", self.on_mouse_move)
@@ -42,15 +41,7 @@ class MprInteractorStyle(vtkInteractorStyleImage):
         """Return True when the viewer has window/level settings."""
         return getattr(self._viewer, "window_settings", None) is not None
 
-    def _vtk_to_qt_position(self, vtk_x: int, vtk_y: int) -> tuple[int, int]:
-        """Convert VTK coordinates to Qt coordinates."""
-        iren = self.GetInteractor()
-        return (
-            vtk_x - iren.GetRenderWindow().GetPosition()[0],
-            vtk_y - iren.GetRenderWindow().GetPosition()[1],
-        )
-
-    def _on_left_button_down(self, obj, event) -> None:
+    def on_left_button_down(self, obj, event) -> None:
         """
         Start a Shift-drag synchronization when possible.
 
@@ -71,7 +62,7 @@ class MprInteractorStyle(vtkInteractorStyleImage):
 
         self.OnLeftButtonDown()
 
-    def _on_left_button_up(self, obj, event) -> None:
+    def on_left_button_up(self, obj, event) -> None:
         """Finish Shift-drag synchronization if it is active."""
         if self._mode == 'sync-drag':
             self._mode = None
