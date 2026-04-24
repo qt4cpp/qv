@@ -100,7 +100,7 @@ PLANE_NORMALS_PATIENT: dict[PlaneName, tuple[float, float, float]] = {
     "sagittal": (1.0, 0.0, 0.0),
 }
 
-CAMERA_ORIENTATION_PATIENT: dict[ViewName, tuple[float, float, float]] = {
+CAMERA_DIRECTIONS_PATIENT: dict[ViewName, tuple[float, float, float]] = {
     "front": (0.0, 1.0, 0.0),
     "back": (0.0, -1.0, 0.0),
     "left": (-1.0, 0.0, 0.0),

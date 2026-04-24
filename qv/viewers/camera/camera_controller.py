@@ -7,6 +7,12 @@ import logging
 
 from qv.viewers.camera.camera_state import CameraAngle, CameraStateManager
 from qv.core import geometry_utils
+from qv.core.patient_geometry import (
+CAMERA_ANGLES,
+CAMERA_DIRECTIONS_PATIENT,
+CAMERA_VIEWUPS_PATIENT,
+PatientFrame,
+)
 
 from qv.utils import vtk_helpers
 
@@ -19,35 +25,13 @@ class CameraPreset:
     """Camera preset configuration for standard views."""
 
     # Preset directions for each view (unit sphere)
-    DIRECTIONS: dict[ViewDirection, tuple[float, float, float]] = {
-        'front': (0.0, 1.0, 0.0),
-        'back': (0.0, -1.0, 0.0),
-        'left': (1.0, 0.0, 0.0),
-        'right': (-1.0, 0.0, 0.0),
-        'top': (0.0, 0.0, -1.0),
-        'bottom': (0.0, 0.0, 1.0),
-    }
+    DIRECTIONS: CAMERA_DIRECTIONS_PATIENT
 
     # Up vectors to keep orientation
-    VIEWUPS = {
-        'front': (0.0, 0.0, -1.0),
-        'back': (0.0, 0.0, -1.0),
-        'left': (0.0, 0.0, -1.0),
-        'right': (0.0, 0.0, -1.0),
-        'top': (0.0, -1.0, 0.0),
-        'bottom': (0.0, 1.0, 0.0),
-    }
+    VIEWUPS = CAMERA_VIEWUPS_PATIENT
 
     # Azimuth and elevation angles for status display.
-    ANGLES = {
-        'front': (0.0, 0.0),
-        'back': (180, 0.0),
-        'left': (90, 0.0),
-        'right': (270, 0.0),
-        'top': (0.0, 90.0),
-        'bottom': (0.0, 270.0),
-    }
-
+    ANGLES = CAMERA_ANGLES
 
 
 class CameraController:
@@ -57,7 +41,7 @@ class CameraController:
         self.camera = camera
         self.renderer = renderer
         self.state = CameraStateManager()
-        self._patient_matrix: vtk.vtkMatrix4x4 | None = None
+        self._patient_frame: PatientFrame | None = None
 
     @property
     def azimuth(self) -> float:
@@ -73,26 +57,9 @@ class CameraController:
         """Add a callback for camera angle changes."""
         self.state.add_angle_changed_callback(callback)
 
-    def set_patient_matrix(self, matrix: vtk.vtkMatrix4x4) -> None:
-        """Set the patient matrix for the camera."""
-        self._patient_matrix = matrix
-
-    def extract_patient_matrix_from_volume(self, volume: vtk.vtkVolume) -> None:
-        """Extract the patient matrix from the volume."""
-        if volume is None:
-            self._patient_matrix = None
-            return
-
-        mapper = volume.GetMapper()
-        if mapper is None:
-            self._patient_matrix = None
-            return
-
-        image = mapper.GetInput()
-        if hasattr(image, "GetDirectionMatrix"):
-            self._patient_matrix = image.GetDirectionMatrix()
-        else:
-            self._patient_matrix = None
+    def set_patient_frame(self, frame: PatientFrame | None) -> None:
+        """Set the shared patient frame used by the loaded volume."""
+        self._patient_frame = frame
 
     def rotate(self, delta_azimuth: float, delta_elevation: float):
         """
@@ -236,10 +203,6 @@ class CameraController:
         direction = CameraPreset.DIRECTIONS[view]
         view_up = CameraPreset.VIEWUPS[view]
         target_angles = CameraPreset.ANGLES[view]
-
-        if self._patient_matrix:
-            direction = geometry_utils.transform_vector(direction, self._patient_matrix)
-            view_up = geometry_utils.transform_vector(view_up, self._patient_matrix)
 
         new_position = tuple(
             focal_point[i] + direction[i] * distance for i in range(3)
