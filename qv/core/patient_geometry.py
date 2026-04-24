@@ -197,7 +197,7 @@ def get_plane_reslice_axes_direction_cosines(
     )
 
 
-def iamge_center_continuous_ijk(image_data: vtk.vtkImageData) -> tuple[float, float, float]:
+def image_center_continuous_ijk(image_data: vtk.vtkImageData) -> tuple[float, float, float]:
     extent = image_data.GetExtent()
     return (
         0.5 * (float(extent[0]) + float(extent[1])),
