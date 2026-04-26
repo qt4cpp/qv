@@ -386,7 +386,7 @@ class VolumeViewer(BaseViewer):
                     out.GetScalarTypeAsString(),
                 )
 
-        self.camera_controller.extract_patient_matrix_from_volume(self.volume)
+        self.camera_controller.set_patient_frame(self.volume)
         self.camera_controller.reset_to_bounds(self.volume.GetBounds(), view='front')
         self._set_camera_parallel_from_current()
 

@@ -26,7 +26,7 @@ class PatientFrame:
     patient_to_src: vtk.vtkMatrix4x4
     convention: Literal["LPS", "RAS"] = "LPS"
 
-    def patient_to_ijk(
+    def patient_point_from_continuous_ijk(
             self,
             ijk: tuple[float, float, float]
     ) -> tuple[float, float, float]:
@@ -51,7 +51,7 @@ class PatientFrame:
                 best_score = score
         return best_axis
 
-    def _source_axis_in_patient(
+    def _source_axes_in_patient(
             self,
     ) -> tuple[
         tuple[float, float, float],
@@ -208,6 +208,15 @@ def image_center_continuous_ijk(image_data: vtk.vtkImageData) -> tuple[float, fl
 
 def patient_axis_coordinate(plane: PlaneName, point: tuple[float, float, float]) -> float:
     return float(point[PLANE_TO_PATIENT_COMPONENT[plane]])
+
+
+def build_patient_point(
+        *,
+        axial: float,
+        coronal: float,
+        sagittal: float,
+) -> tuple[float, float, float]:
+    return float(sagittal), float(coronal), float(axial)
 
 
 def multiply_point(matrix: vtk.vtkMatrix4x4,
