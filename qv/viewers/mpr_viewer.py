@@ -17,6 +17,7 @@ build_patient_point,
 get_plane_axes,
 get_plane_reslice_axes_direction_cosines,
 image_center_continuous_ijk,
+orientation_labels_from_display_axes,
 patient_axis_coordinate,
 )
 from qv.viewers.base_viewer import BaseViewer
@@ -117,14 +118,14 @@ class MprViewer(BaseViewer):
         self._slice_min: int = 0
         self._slice_max: int = 0
 
-        self._patient_frame: PatientFrame | None = None
-
         self._reslice: vtk.vtkImageReslice | None = None
         self._wl_map: vtk.vtkImageMapToWindowLevelColors | None = None
         self._image_actor: vtk.vtkImageActor | None = None
         self._interactor_style: vtk.vtkInteractorStyleImage | None = None
 
+        self._patient_frame: PatientFrame | None = None
         self._plane_overlay_actor: vtk.vtkTextActor | None = None
+        self._orientation_marker_actor:  dict[str, vtk.vtkTextActor] = {}
         self._crosshair_line_source: dict[str, vtk.vtkLineSource] = {}
         self._crosshair_actor: dict[str, vtk.vtkActor] = {}
         self._crosshair_slice_refs: dict[MprPlane, int | None] = {
@@ -140,6 +141,7 @@ class MprViewer(BaseViewer):
         self.vtk_widget.installEventFilter(self)
 
         self._init_plane_overlay()
+        self._init_orientation_marker_overlay()
         self._init_crosshair_overlay()
         self._setup_pipeline()
         self._sync_plane_overlay_text()
@@ -393,6 +395,59 @@ class MprViewer(BaseViewer):
         self.overlay_renderer.AddActor(actor)
         self._plane_overlay_actor = actor
 
+    def _init_orientation_marker_overlay(self) -> None:
+        specs: dict[str, tuple[float, float, str]] = {
+            "left": (0.02, 0.50, "left"),
+            "right": (0.98, 0.50, "right"),
+            "top": (0.50, 0.98, "center"),
+            "bottom": (0.50, 0.02, "center"),
+        }
+
+        for name, (x, y, horizontal) in specs.items():
+            actor = vtk.vtkTextActor()
+            actor.SetInput("")
+
+            text_prop = actor.GetTextProperty()
+            text_prop.SetFontFamilyToCourier()
+            text_prop.SetFontSize(14)
+            text_prop.SetColor(0.95, 0.95, 0.30)
+            text_prop.SetBold(True)
+            text_prop.SetItalic(False)
+            text_prop.SetShadow(True)
+
+            if horizontal == "left":
+                text_prop.SetJustificationToLeft()
+            elif horizontal == "right":
+                text_prop.SetJustificationToRight()
+            else:
+                text_prop.SetJustificationToCentered()
+
+            text_prop.SetVerticalJustificationToCentered()
+
+            actor.GetPositionCoordinate().SetCoordinateSystemToNormalizedViewport()
+            actor.SetPosition(x, y)
+            actor.VisibilityOff()
+
+            self.overlay_renderer.AddActor(actor)
+            self._orientation_marker_actor[name] = actor
+
+    def _set_orientation_marker_visibility(self, visible: bool) -> None:
+        for actor in self._orientation_marker_actor.values():
+            actor.SetVisibility(1 if visible else 0)
+
+    def _sync_orientation_marker_overlay(self) -> None:
+        axes_components = self._get_current_reslice_axes_components()
+        if axes_components is None:
+            self._set_orientation_marker_visibility(False)
+            return
+
+        x_axis, y_axis, _, _ = axes_components
+        labels = orientation_labels_from_display_axes(x_axis, y_axis)
+
+        for name, actor in self._orientation_marker_actor.items():
+            actor.SetInput(labels[name])
+            actor.SetVisibility(1)
+
     def _init_crosshair_overlay(self) -> None:
         """
         Create world-space crosshair actors.
@@ -610,6 +665,7 @@ class MprViewer(BaseViewer):
         )
         self._reslice.Modified()
         self._reslice.Update()
+        self._sync_orientation_marker_overlay()
 
         # Display Extent をリセットして全体を表示させる
         if self._image_actor is not None:

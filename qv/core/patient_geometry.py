@@ -5,8 +5,59 @@ from typing import Literal
 
 import vtk
 
+
 PlaneName = Literal["axial", "coronal", "sagittal"]
 ViewName = Literal["front", "back", "left", "right", "top", "bottom"]
+
+PATIENT_AXIS_LABELS: dict[int, tuple[str, str]] = {
+    0: ("R", "L"),  # -X, +X
+    1: ("A", "P"),  # -Y, +Y
+    2: ("S", "I"),  # -Z, +Z
+}
+
+
+def dominant_orientation_label(vector: tuple[float, float, float]) -> str:
+    """
+    Return the anatomical label of the dominant patient-space axis.
+
+    Internal Patient convention in LPS:
+    +X = L, +Y = P, +Z = A
+    """
+    axis = max(range(3), key=lambda index: abs(vector[index]))
+    negative_label, positive_label = PATIENT_AXIS_LABELS[axis]
+    return positive_label if vector[axis] > 0.0 else negative_label
+
+
+def opposite_orientation_label(label: str) -> str:
+    return {
+        "L": "R",
+        "R": "L",
+        "A": "P",
+        "P": "A",
+        "S": "I",
+        "I": "S",
+    }[label]
+
+
+def orientation_labels_from_display_axes(
+        x_axis: tuple[float, float, float],
+        y_axis: tuple[float, float, float],
+) -> dict[str, str]:
+    """
+    Map displayed slice axes to edge labels.
+
+    x_axis: screen +X direction = viewer right
+    y_axis: screen +Y direction = viewer top
+    """
+    right = dominant_orientation_label(x_axis)
+    top = dominant_orientation_label(y_axis)
+
+    return {
+        "left": opposite_orientation_label(right),
+        "right": right,
+        "top": opposite_orientation_label(top),
+        "bottom": top,
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,7 +200,7 @@ def build_patient_frame(image_data: vtk.vtkImageData) -> PatientFrame:
         for col in range(3):
             direction_value = direction3.GetElement(row, col)
             src_to_patient.SetElement(row, col, direction_value)
-            ijk_to_patient.SetElement(row, col, direction_value * float(spacing[row]))
+            ijk_to_patient.SetElement(row, col, direction_value * float(spacing[col]))
         ijk_to_patient.SetElement(row, 3, float(origin[row]))
 
     patient_to_ijk = vtk.vtkMatrix4x4()
