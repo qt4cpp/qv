@@ -25,7 +25,7 @@ class CameraPreset:
     """Camera preset configuration for standard views."""
 
     # Preset directions for each view (unit sphere)
-    DIRECTIONS: CAMERA_DIRECTIONS_PATIENT
+    DIRECTIONS = CAMERA_DIRECTIONS_PATIENT
 
     # Up vectors to keep orientation
     VIEWUPS = CAMERA_VIEWUPS_PATIENT
