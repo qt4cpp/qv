@@ -129,19 +129,19 @@ PLANE_DISPLAY_AXES_PATIENT: dict[
     ],
 ] = {
     "axial": (
-        (1.0, 0.0, 0.0),
-        (0.0, -1.0, 0.0),
-        (0.0, 0.0, -1.0),
+        (1.0, 0.0, 0.0),   # x_axis: screen right = patient left
+        (0.0, -1.0, 0.0),  # y_axis: screen top   = patient anterios
+        (0.0, 0.0, -1.0),  # z_axis: view normal  = toward inferior
     ),
     "coronal": (
-        (-1.0, 0.0, 0.0),
-        (0.0, 0.0, 1.0),
-        (0.0, 1.0, 0.0),
+        (1.0, 0.0, 0.0),   # x_axis: screen right = patient left
+        (0.0, 0.0, 1.0),   # y_axis: screen top   = patient superior
+        (0.0, 1.0, 0.0),   # z_axis: view normal  = toward superior
     ),
     "sagittal": (
-        (0.0, 1.0, 0.0),
-        (0.0, 0.0, 1.0),
-        (1.0, 0.0, 0.0),
+        (0.0, 1.0, 0.0),   # x_axis: screen right = patient superior
+        (0.0, 0.0, 1.0),   # y_axis: screen top   = patient superior
+        (1.0, 0.0, 0.0),   # z_axis: view normal  = toward left
     ),
 }
 

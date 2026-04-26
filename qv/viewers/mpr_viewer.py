@@ -51,27 +51,6 @@ class MprPlane(enum.Enum):
     SAGITTAL = "sagittal"
 
 
-# Direction cosines for vtkImageReslice.SetResliceAxesDirectionCosines(...)
-# (x_axis, y_axis, z_axis) as 3x3 row-major values.
-PLANE_AXES: dict[MprPlane, tuple[float, float, float, float, float, float, float, float, float]] = {
-    MprPlane.AXIAL: (
-        1.0, 0.0, 0.0,
-        0.0, -1.0, 0.0,
-        0.0, 0.0, -1.0,
-    ),
-    MprPlane.CORONAL: (
-        -1.0, 0.0, 0.0,
-        0.0, 0.0, 1.0,
-        0.0, 1.0, 0.0,
-    ),
-    MprPlane.SAGITTAL: (
-        0.0, 1.0, 0.0,
-        0.0, 0.0, 1.0,
-        1.0, 0.0, 0.0,
-    ),
-}
-
-
 PLANE_AXES_INDEX: dict[MprPlane, int] = {
     MprPlane.AXIAL: 2,
     MprPlane.CORONAL: 1,
