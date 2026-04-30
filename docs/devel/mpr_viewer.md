@@ -158,17 +158,72 @@ def _update_reslice(self) -> None:
 ### `setup_interactor_style()`
 
 MPR ビューワーでは 3D 回転は不要。  
-VTK 標準の `vtkInteractorStyleImage` を使用し、以下を有効にする:
+`vtkInteractorStyleImage` を継承した `MprInteractorStyle` を使用し、MPR 専用の 2D 操作を定義する。
 
-- **マウスホイール**: `scroll_slice()` 呼び出し
-- **左ドラッグ**: スライス移動（パン）
-- **右ドラッグ**: Window/Level 調整（将来実装）
+### 操作仕様
 
-### `MprInteractorStyle`（将来拡張）
+| 操作 | 挙動 | 備考 |
+|---|---|---|
+| マウスホイール | スライス移動 | `scroll_slice()` を呼び出す |
+| Shift + マウスホイール | 拡大 / 縮小 | 2D MPR のため `vtkCamera` の `ParallelScale` を変更する |
+| 左ドラッグ上下 | スライス移動 | 上下方向の移動量を一定ピクセル単位でスライス差分に変換する |
+| 右ドラッグ | Window/Level 調整 | 横移動を Window、縦移動を Level に割り当てる |
+| 左ダブルクリック | MPR 同期 | 指定位置を基準に他 MPR のスライスを同期する |
+| Shift + 左ドラッグ | 連続 MPR 同期 | ドラッグ中のカーソル位置を基準に他 MPR を追従させる |
 
-将来的に独自の `InteractorStyle` が必要になれば  
-`qv/viewers/interactor_styles/mpr_interactor_style.py` に切り出す。  
-現時点では `vtkInteractorStyleImage` の Observer で対応する。
+### スライスドラッグ
+
+左ドラッグ単体ではパンではなくスライス移動を行う。  
+ドラッグ中の上下移動量を累積し、一定ピクセル数を超えたタイミングで `scroll_slice()` を呼び出す。
+
+- 細かいマウス移動で過剰にスライスが飛ばないよう、ピクセル閾値を設ける。
+- 閾値未満の移動量は次の `MouseMoveEvent` に持ち越す。
+- スライス移動方向はホイール操作の方向と体感が一致するように調整する。
+
+### ズーム
+
+Shift + マウスホイールでは MPR 画像の拡大 / 縮小を行う。  
+MPR は平行投影の 2D ビューであるため、カメラ距離ではなく `vtkCamera.SetParallelScale()` で表示倍率を制御する。
+
+- `Shift + wheel forward`: 拡大
+- `Shift + wheel backward`: 縮小
+- ズーム倍率は過剰な拡大 / 縮小を避けるため、最小値・最大値でクランプする。
+- スライス変更時にズーム状態はリセットしない。
+- plane 切り替えや画像読み込み時は、初期表示に合わせてズーム基準を再設定する。
+
+ズームリセットは独立した機能として別途定義する。  
+将来的には UI 操作、ショートカット、コンテキストメニューなどから現在の MPR viewer のズームだけを初期表示に戻せるようにする。
+
+### ズームリセット
+
+ズームリセットは `VolumeViewer` と同じ操作モデルで提供する。  
+メニューや将来実装するボタンから呼び出せるよう、`MprViewer` 側にも `VolumeViewer` と揃えたズーム API を持たせる。
+
+```python
+def set_zoom_factor(self, factor: float) -> None:
+    """初期表示を 1.0 とした倍率で MPR 表示をズームする。"""
+
+def reset_zoom(self) -> None:
+    """MPR 表示を初期フィット状態に戻す。"""
+```
+
+MPR は平行投影の 2D ビューであるため、`VolumeViewer` のようにカメラ距離を変更せず、初期フィット時の `ParallelScale` を基準値として保持する。
+
+- 画像読み込み後、初期フィット時の `ParallelScale` をズーム基準値として保存する。
+- `set_zoom_factor(1.0)` および `reset_zoom()` は、その基準値へ戻す。
+- スライス変更時はズーム基準値を更新しない。
+- スライス変更時は現在のズーム倍率を維持する。
+- plane 切り替えや画像読み込み時は、表示対象が変わるためズーム基準値を再設定する。
+
+UI からの呼び出しは後続実装とする。  
+ただし今回のズーム実装では、メニューやボタンが viewer 種別を意識しすぎないよう、`MprViewer` に `reset_zoom()` API を用意しておく。
+
+4画面構成でのリセット対象は UI 仕様として別途決める。
+
+- アクティブな MPR viewer のみをリセットする。
+- 全 MPR viewer をまとめてリセットする。
+- VolumeViewer と MPR viewer を個別にリセットする。
+- すべての viewer をまとめてリセットする。
 
 ---
 
