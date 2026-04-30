@@ -75,3 +75,27 @@ def mpr_viewer(qtbot, settings_manager, monkeypatch):
     viewer = MprViewer(settings_manager=settings_manager)
     qtbot.addWidget(viewer)
     return viewer
+
+
+@pytest.fixture
+def oriented_sample_image_data(sample_image_data):
+    image = vtk.vtkImageData()
+    image.DeepCopy(sample_image_data)
+
+    direction = vtk.vtkMatrix3x3()
+    direction.Identity()
+    direction.SetElement(0, 0, 0.0)
+    direction.SetElement(1, 0, 1.0)
+    direction.SetElement(2, 0, 0.0)
+
+    direction.SetElement(0, 1, 1.0)
+    direction.SetElement(1, 1, 0.0)
+    direction.SetElement(2, 1, 0.0)
+
+    direction.SetElement(0, 2, 1.0)
+    direction.SetElement(1, 2, 0.0)
+    direction.SetElement(2, 2, 0.0)
+
+    image.SetDirectionMatrix(direction)
+    image.Modified()
+    return image

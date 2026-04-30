@@ -8,6 +8,7 @@ from matplotlib import pyplot as plt
 from vtkmodules.util.numpy_support import vtk_to_numpy
 
 from qv.core import geometry_utils
+from qv.core.patient_geometry import PatientFrame, build_patient_frame
 
 
 def load_dicom_series(directory: str) -> vtk.vtkImageData:
@@ -16,6 +17,12 @@ def load_dicom_series(directory: str) -> vtk.vtkImageData:
     reader.SetDirectoryName(directory)
     reader.Update()
     return reader.GetOutput()
+
+
+def load_dicom_series_with_patient_frame(directory: str) -> tuple[vtk.vtkImageData, PatientFrame]:
+    """Load a DICOM series from a directory and return the patient frame."""
+    image = load_dicom_series(directory)
+    return image, build_patient_frame(image)
 
 
 def select_dicom_directory() -> str | None:

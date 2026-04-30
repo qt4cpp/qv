@@ -6,6 +6,8 @@ import vtk
 from PySide6 import QtCore, QtWidgets
 
 from qv.app.app_settings_manager import AppSettingsManager
+from qv.core.patient_geometry import PatientFrame
+
 from qv.utils.log_util import logger
 from  qv.viewers.controllers.mpr_sync_controller import MprSyncController
 from qv.viewers.mpr_viewer import MprPlane, MprViewer
@@ -44,6 +46,7 @@ class MultiViewerPanel(QtWidgets.QWidget):
         self._viewers: dict[str, QtWidgets.QWidget] = {}
         self.mpr_viewers: dict[MprPlane, MprViewer] = {}
         self._mpr_sync_controller = MprSyncController()
+        self._shared_patient_frame: PatientFrame | None = None
 
         self._build_shell()
         self._create_viewers()
@@ -127,7 +130,11 @@ class MultiViewerPanel(QtWidgets.QWidget):
         self._redistribute_image_data()
         self._initialize_splitter_sizes()
 
-    def set_image_data(self, image_data: vtk.vtkImageData | None) -> None:
+    def set_image_data(
+            self,
+            image_data: vtk.vtkImageData | None,
+            patient_frame: PatientFrame | None
+    ) -> None:
         """
         Store the shared image and distribute it to the active MPR viewers.
 
@@ -135,6 +142,7 @@ class MultiViewerPanel(QtWidgets.QWidget):
         to VolumeVieewer internals.
         """
         self._shared_image = image_data
+        self._shared_patient_frame = patient_frame
         self._redistribute_image_data()
 
     def _clear_content_layout(self) -> None:
@@ -222,7 +230,7 @@ class MultiViewerPanel(QtWidgets.QWidget):
             return
 
         for viewer in self._visible_mpr_viewers():
-            viewer.set_image_data(self._shared_image)
+            viewer.set_image_data(self._shared_image, patient_frame=self._shared_patient_frame,)
 
         self._synchronize_crosshair_state()
 
@@ -282,7 +290,7 @@ class MultiViewerPanel(QtWidgets.QWidget):
             logger.debug("[MultiViewerPanel] No image data to load.")
             return
 
-        self.set_image_data(image)
+        self.set_image_data(image, patient_frame=self.volume_viewer.patient_frame)
 
     def _on_mpr_slice_changed(self, plane: MprPlane, slice_index: int) -> None:
         """

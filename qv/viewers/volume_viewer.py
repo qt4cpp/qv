@@ -17,6 +17,7 @@ import qv.utils.vtk_helpers as vtk_helpers
 from qv.app.app_settings_manager import AppSettingsManager
 from qv.core import geometry_utils
 from qv.core.window_settings import WindowSettings
+from qv.core.patient_geometry import PatientFrame
 from qv.utils.log_util import log_io, log_kpi
 from qv.operations.clipping.clipping_operation import ClippingOperation, CLIPPED_SCALAR, ClipMode
 from qv.viewers.interactor_styles.clipping_interactor_style import ClippingInteractorStyle
@@ -62,6 +63,8 @@ class VolumeViewer(BaseViewer):
         self.opacity_func: vtk.vtkPiecewiseFunction | None = None
         self.mask_image: vtk.vtkImageData | None = None
 
+        self._patient_frame: PatientFrame | None = None
+
         # Window/level attributes
         self.delta_per_pixel: float = 1.0
 
@@ -101,6 +104,10 @@ class VolumeViewer(BaseViewer):
         super().__init__(settings_manager=settings_manager, parent=parent)
         self.vtk_widget.installEventFilter(self)
         self._setup_clipping()
+
+    @property
+    def patient_frame(self) -> PatientFrame | None:
+        return self._patient_frame
 
     def setup_interactor_style(self) -> None:
         """Set up the interactor style for volume viewer."""
@@ -379,7 +386,7 @@ class VolumeViewer(BaseViewer):
                     out.GetScalarTypeAsString(),
                 )
 
-        self.camera_controller.extract_patient_matrix_from_volume(self.volume)
+        self.camera_controller.set_patient_frame(self.volume)
         self.camera_controller.reset_to_bounds(self.volume.GetBounds(), view='front')
         self._set_camera_parallel_from_current()
 

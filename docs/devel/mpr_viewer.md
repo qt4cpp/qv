@@ -14,6 +14,10 @@
 
 ## MPR Viewer 設計ドキュメント
 
+関連仕様:
+
+- `Patient Orientation` 仕様: `docs/devel/patient_orientation.md`
+
 ## 概要
 
 `MprViewer` は `BaseViewer` を継承した MPR（Multi-Planar Reconstruction）専用ビューワーである。  

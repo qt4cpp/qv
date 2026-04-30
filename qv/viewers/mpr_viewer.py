@@ -9,19 +9,22 @@ from PySide6 import QtCore
 from PySide6.QtCore import QEvent
 
 from qv.core.window_settings import WindowSettings
+from qv.core.patient_geometry import (
+PatientFrame,
+WorldPosition,
+build_patient_frame,
+build_patient_point,
+get_plane_axes,
+get_plane_reslice_axes_direction_cosines,
+image_center_continuous_ijk,
+orientation_labels_from_display_axes,
+patient_axis_coordinate,
+)
 from qv.viewers.base_viewer import BaseViewer
 from qv.viewers.coordinates import QtDisplayPoint, VtkDisplayPoint, qt_to_vtk_display
 from qv.viewers.interactor_styles.mpr_interactor_style import MprInteractorStyle
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True, slots=True)
-class WorldPosition:
-    """An anatomical point in source-world coordinates."""
-    x: float
-    y: float
-    z: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,27 +49,6 @@ class MprPlane(enum.Enum):
     AXIAL = "axial"
     CORONAL = "coronal"
     SAGITTAL = "sagittal"
-
-
-# Direction cosines for vtkImageReslice.SetResliceAxesDirectionCosines(...)
-# (x_axis, y_axis, z_axis) as 3x3 row-major values.
-PLANE_AXES: dict[MprPlane, tuple[float, float, float, float, float, float, float, float, float]] = {
-    MprPlane.AXIAL: (
-        1.0, 0.0, 0.0,
-        0.0, -1.0, 0.0,
-        0.0, 0.0, -1.0,
-    ),
-    MprPlane.CORONAL: (
-        -1.0, 0.0, 0.0,
-        0.0, 0.0, 1.0,
-        0.0, 1.0, 0.0,
-    ),
-    MprPlane.SAGITTAL: (
-        0.0, 1.0, 0.0,
-        0.0, 0.0, 1.0,
-        1.0, 0.0, 0.0,
-    ),
-}
 
 
 PLANE_AXES_INDEX: dict[MprPlane, int] = {
@@ -120,7 +102,9 @@ class MprViewer(BaseViewer):
         self._image_actor: vtk.vtkImageActor | None = None
         self._interactor_style: vtk.vtkInteractorStyleImage | None = None
 
+        self._patient_frame: PatientFrame | None = None
         self._plane_overlay_actor: vtk.vtkTextActor | None = None
+        self._orientation_marker_actor:  dict[str, vtk.vtkTextActor] = {}
         self._crosshair_line_source: dict[str, vtk.vtkLineSource] = {}
         self._crosshair_actor: dict[str, vtk.vtkActor] = {}
         self._crosshair_slice_refs: dict[MprPlane, int | None] = {
@@ -136,6 +120,7 @@ class MprViewer(BaseViewer):
         self.vtk_widget.installEventFilter(self)
 
         self._init_plane_overlay()
+        self._init_orientation_marker_overlay()
         self._init_crosshair_overlay()
         self._setup_pipeline()
         self._sync_plane_overlay_text()
@@ -159,6 +144,11 @@ class MprViewer(BaseViewer):
     def image_data(self) -> vtk.vtkImageData | None:
         """Expose loaded image  data for interactor-style checks."""
         return self._image_data
+
+    @property
+    def patient_frame(self) -> PatientFrame | None:
+        """Return the patient frame for the current plane."""
+        return self._patient_frame
 
     def eventFilter(self, obj, event):
         """
@@ -299,24 +289,20 @@ class MprViewer(BaseViewer):
         if self._image_data is None:
             raise RuntimeError("Image data not loaded.")
 
-        origin = self._image_data.GetOrigin()
-        spacing = self._image_data.GetSpacing()
-        axis = PLANE_AXES_INDEX[self._plane]
-
-        axis_spacing = float(spacing[axis])
-        if abs(axis_spacing) < 1e-9:
-            raise RuntimeError(f"Invalid spacing for plane {self._plane.value}: {axis_spacing}.")
-
-        world_values = (
-            world_position.x,
-            world_position.y,
-            world_position.z,
+        continuous_ijk = self._patient_frame.continuous_ijk_from_patient_point(
+            (world_position.x, world_position.y, world_position.z),
         )
-        return int(round((world_values[axis] - origin[axis]) / axis_spacing))
+        axis = self._get_plane_source_axis()
+        return int(round(continuous_ijk[axis]))
 
     def _get_current_reslice_axes_components(
             self,
-    ) -> tuple[tuple[float, float, float], tuple[float, float, float], tuple[float, float, float], tuple[float, float, float]] | None:
+    ) -> tuple[
+        tuple[float, float, float],
+        tuple[float, float, float],
+        tuple[float, float, float],
+        tuple[float, float, float]
+    ] | None:
         """
         Return the active reslice basis vectors and origin.
 
@@ -326,10 +312,7 @@ class MprViewer(BaseViewer):
         if self._reslice is None or self._image_data is None:
             return None
 
-        axes = PLANE_AXES[self._plane]
-        x_axis = (axes[0], axes[1], axes[2])
-        y_axis = (axes[3], axes[4], axes[5])
-        z_axis = (axes[6], axes[7], axes[8])
+        x_axis, y_axis, z_axis = get_plane_axes(self._plane.value)
 
         origin = self._reslice.GetResliceAxesOrigin()
         if origin is None:
@@ -390,6 +373,59 @@ class MprViewer(BaseViewer):
 
         self.overlay_renderer.AddActor(actor)
         self._plane_overlay_actor = actor
+
+    def _init_orientation_marker_overlay(self) -> None:
+        specs: dict[str, tuple[float, float, str]] = {
+            "left": (0.02, 0.50, "left"),
+            "right": (0.98, 0.50, "right"),
+            "top": (0.50, 0.98, "center"),
+            "bottom": (0.50, 0.02, "center"),
+        }
+
+        for name, (x, y, horizontal) in specs.items():
+            actor = vtk.vtkTextActor()
+            actor.SetInput("")
+
+            text_prop = actor.GetTextProperty()
+            text_prop.SetFontFamilyToCourier()
+            text_prop.SetFontSize(14)
+            text_prop.SetColor(0.95, 0.95, 0.30)
+            text_prop.SetBold(True)
+            text_prop.SetItalic(False)
+            text_prop.SetShadow(True)
+
+            if horizontal == "left":
+                text_prop.SetJustificationToLeft()
+            elif horizontal == "right":
+                text_prop.SetJustificationToRight()
+            else:
+                text_prop.SetJustificationToCentered()
+
+            text_prop.SetVerticalJustificationToCentered()
+
+            actor.GetPositionCoordinate().SetCoordinateSystemToNormalizedViewport()
+            actor.SetPosition(x, y)
+            actor.VisibilityOff()
+
+            self.overlay_renderer.AddActor(actor)
+            self._orientation_marker_actor[name] = actor
+
+    def _set_orientation_marker_visibility(self, visible: bool) -> None:
+        for actor in self._orientation_marker_actor.values():
+            actor.SetVisibility(1 if visible else 0)
+
+    def _sync_orientation_marker_overlay(self) -> None:
+        axes_components = self._get_current_reslice_axes_components()
+        if axes_components is None:
+            self._set_orientation_marker_visibility(False)
+            return
+
+        x_axis, y_axis, _, _ = axes_components
+        labels = orientation_labels_from_display_axes(x_axis, y_axis)
+
+        for name, actor in self._orientation_marker_actor.items():
+            actor.SetInput(labels[name])
+            actor.SetVisibility(1)
 
     def _init_crosshair_overlay(self) -> None:
         """
@@ -520,7 +556,11 @@ class MprViewer(BaseViewer):
 
         super().set_window_settings(clamped, emit_signal=emit_signal, render=render)
 
-    def set_image_data(self, image_data: vtk.vtkImageData) -> None:
+    def set_image_data(
+            self,
+            image_data: vtk.vtkImageData,
+            patient_frame: PatientFrame | None = None
+    ) -> None:
         """
         Set the shared vtkImageData and initialize this viewer's own slice state.
 
@@ -531,6 +571,7 @@ class MprViewer(BaseViewer):
             return
 
         self._image_data = image_data
+        self._patient_frame = patient_frame or build_patient_frame(image_data)
         self._reslice.SetInputData(image_data)
         logger.info("MPR image data loaded for %s", self._plane.value)
 
@@ -557,10 +598,7 @@ class MprViewer(BaseViewer):
             self._slice_max = 0
             return
 
-        extent = self._image_data.GetExtent()
-        axis = PLANE_AXES_INDEX[self._plane]
-        self._slice_min = int(extent[2 * axis])
-        self._slice_max = int(extent[2 * axis + 1])
+        self._slice_min, self._slice_max = self._get_plane_index_range(self._plane)
 
     def set_plane(self, plane: MprPlane) -> None:
         """
@@ -594,21 +632,11 @@ class MprViewer(BaseViewer):
         if self._reslice is None or self._image_data is None:
             return
 
-        self._reslice.SetResliceAxesDirectionCosines(*PLANE_AXES[self._plane])
+        self._reslice.SetResliceAxesDirectionCosines(
+            *get_plane_reslice_axes_direction_cosines(self._plane.value)
+        )
 
-        extent = self._image_data.GetExtent()
-        spacing = self._image_data.GetSpacing()
-        origin = self._image_data.GetOrigin()
-
-        cx = origin[0] + (extent[0] + extent[1]) / 2.0 * spacing[0]
-        cy = origin[1] + (extent[2] + extent[3]) / 2.0 * spacing[1]
-        cz = origin[2] + (extent[4] + extent[5]) / 2.0 * spacing[2]
-
-        world_origin = [cx, cy, cz]
-
-        axis = PLANE_AXES_INDEX[self._plane]
-        world_origin[axis] = origin[axis] + self._slice_index * spacing[axis]
-
+        world_origin = self._slice_origin_for_plane(self._plane, self._slice_index)
         self._reslice.SetResliceAxesOrigin(
             world_origin[0],
             world_origin[1],
@@ -616,6 +644,7 @@ class MprViewer(BaseViewer):
         )
         self._reslice.Modified()
         self._reslice.Update()
+        self._sync_orientation_marker_overlay()
 
         # Display Extent をリセットして全体を表示させる
         if self._image_actor is not None:
@@ -801,18 +830,8 @@ class MprViewer(BaseViewer):
 
     def _slice_index_to_world(self, plane: MprPlane, slice_index: int) -> float:
         """Convert a slice index on the given plane to world corrdinate."""
-        if self._image_data is None:
-            raise RuntimeError("Image data not loaded.")
-
-        extent = self._image_data.GetExtent()
-        spacing = self._image_data.GetSpacing()
-        origin = self._image_data.GetOrigin()
-
-        axis = PLANE_AXES_INDEX[plane]
-        min_index = int(extent[2 * axis])
-        max_index = int(extent[2 * axis + 1])
-        clamped = max(min_index, min(int(slice_index), max_index))
-        return origin[axis] + clamped * spacing[axis]
+        point = self._slice_origin_for_plane(plane, slice_index)
+        return patient_axis_coordinate(plane.value, point)
 
     def _build_crosshair_world_position(self) -> tuple[float, float, float] | None:
         """
@@ -821,33 +840,22 @@ class MprViewer(BaseViewer):
         World space is the canonical source of truth. Each viewer then converts
         that point into its own displayed slice space.
         """
-        vertical_plane, horizontal_plane = CROSSHAIR_REFERENCE_PLANE[self._plane]
-        vertical_index = self._crosshair_slice_refs[vertical_plane]
-        horizontal_index = self._crosshair_slice_refs[horizontal_plane]
+        plane_indices: dict[MprPlane, int | None] = {
+            MprPlane.AXIAL: self._slice_index if self._plane == MprPlane.AXIAL else self._crosshair_slice_refs[MprPlane.AXIAL],
+            MprPlane.CORONAL: self._slice_index if self._plane == MprPlane.CORONAL else self._crosshair_slice_refs[MprPlane.CORONAL],
+            MprPlane.SAGITTAL: self._slice_index if self._plane == MprPlane.SAGITTAL else self._crosshair_slice_refs[MprPlane.SAGITTAL],
+        }
 
-        if vertical_index is None or horizontal_index is None:
+        if any(value is None for value in plane_indices.values()):
             logger.debug("[MprViewer:%s] Index is None, skipping crosshair rendering.",
                          self._plane.value)
             return None
 
-        if self._plane == MprPlane.AXIAL:
-            return (
-                self._slice_index_to_world(MprPlane.SAGITTAL, vertical_index),  # x
-                self._slice_index_to_world(MprPlane.CORONAL, horizontal_index), # y
-                self._slice_index_to_world(MprPlane.AXIAL, self._slice_index),  # z
-            )
-        elif self._plane == MprPlane.CORONAL:
-            return (
-                self._slice_index_to_world(MprPlane.SAGITTAL, vertical_index),
-                self._slice_index_to_world(MprPlane.CORONAL, self._slice_index),
-                self._slice_index_to_world(MprPlane.AXIAL, horizontal_index),
-            )
-        else:
-            return (
-                self._slice_index_to_world(MprPlane.SAGITTAL, self._slice_index),
-                self._slice_index_to_world(MprPlane.CORONAL, vertical_index),
-                self._slice_index_to_world(MprPlane.AXIAL, horizontal_index),
-            )
+        return build_patient_point(
+            axial=self._slice_index_to_world(MprPlane.AXIAL, plane_indices[MprPlane.AXIAL]),
+            coronal=self._slice_index_to_world(MprPlane.CORONAL, plane_indices[MprPlane.CORONAL]),
+            sagittal=self._slice_index_to_world(MprPlane.SAGITTAL, plane_indices[MprPlane.SAGITTAL]),
+        )
 
     def _build_crosshair_segments(
             self,
@@ -954,3 +962,39 @@ class MprViewer(BaseViewer):
         display_z = dx  * z_axis[0] + dy * z_axis[1] + dz * z_axis[2]
 
         return display_x, display_y, display_z
+
+    # #####################################################
+    # Patient Frame
+    # #####################################################
+    def _plane_name(self, plane: MprPlane | None) -> str:
+        """Return the plane name for the given plane."""
+        return (plane or self._plane).value
+
+    def _get_plane_source_axis(self, plane: MprPlane | None = None) -> int:
+        if self._patient_frame is None:
+            raise RuntimeError("Patient frame not initialized.")
+        return self._patient_frame.source_axis_for_plane(self._plane_name(plane))
+
+    def _get_plane_index_range(self, plane: MprPlane) -> tuple[int, int,]:
+        if self._image_data is None:
+            raise RuntimeError("Image data not loaded.")
+        axis = self._get_plane_source_axis(plane)
+        extent = self._image_data.GetExtent()
+        return int(extent[2 * axis]), int(extent[2 * axis + 1])
+
+    def _slice_origin_for_plane(
+            self,
+            plane: MprPlane,
+            slice_index: int,
+    ) -> tuple[float, float, float]:
+        if self._image_data is None or self._patient_frame is None:
+            raise RuntimeError("Image data or patient frame not loaded.")
+
+        center_ijk = list(image_center_continuous_ijk(self._image_data))
+        min_index, max_index = self._get_plane_index_range(plane)
+        axis = self._get_plane_source_axis(plane)
+        center_ijk[axis] = float(max(min_index, min(int(slice_index), max_index)))
+
+        return self._patient_frame.patient_point_from_continuous_ijk(
+            (center_ijk[0], center_ijk[1], center_ijk[2])
+        )

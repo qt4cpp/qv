@@ -6,6 +6,7 @@ import pytest
 from PySide6 import QtWidgets
 
 from qv.core.window_settings import WindowSettings
+from qv.core.patient_geometry import PatientFrame, build_patient_frame
 from qv.viewers.coordinates import QtDisplayPoint
 from qv.viewers.mpr_viewer import MprPlane, MprViewer, SyncRequest, WorldPosition
 
@@ -343,3 +344,36 @@ def test_request_sync_at_qt_position_emits_shift_drag_sync_request(
         assert request.update_crosshair is True
         assert request.update_slices is True
         assert request.shift_pressed is True
+
+
+def test_oriented_image_remaps_axial_slice_axis_to_patient_superior(
+        mpr_viewer,
+        oriented_sample_image_data,
+):
+
+    mpr_viewer.set_image_data(oriented_sample_image_data)
+
+    assert mpr_viewer._slice_min == 0
+    assert mpr_viewer._slice_max == 4
+    assert mpr_viewer._slice_index == 2
+
+
+def test_world_to_slice_index_uses_patient_frame_for_oriented_image(
+        mpr_viewer,
+        oriented_sample_image_data,
+):
+    frame = build_patient_frame(oriented_sample_image_data)
+    patient_point = frame.patient_point_from_continuous_ijk((1.0, 3.0, 2.0))
+
+    mpr_viewer.set_image_data(
+        oriented_sample_image_data,
+        patient_frame=frame,
+    )
+
+    assert mpr_viewer.world_to_slice_index(
+        WorldPosition(
+            x=patient_point[0],
+            y=patient_point[1],
+            z=patient_point[2],
+        )
+    ) == 3
