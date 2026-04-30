@@ -97,6 +97,12 @@ class MprViewer(BaseViewer):
         self._slice_min: int = 0
         self._slice_max: int = 0
 
+        self._base_parallel_scale: float | None = None
+        self._zoom_factor: float = 1.0
+        self._min_zoom_factor: float = 0.1
+        self._max_zoom_factor: float = 10.0
+        self._zoom_step: float = 1.15
+
         self._reslice: vtk.vtkImageReslice | None = None
         self._wl_map: vtk.vtkImageMapToWindowLevelColors | None = None
         self._image_actor: vtk.vtkImageActor | None = None
@@ -708,6 +714,7 @@ class MprViewer(BaseViewer):
         camera.OrthogonalizeViewUp()
 
         self.renderer.ResetCamera()
+        self._reset_zoom_baseline()
         self.renderer.ResetCameraClippingRange()
         self.overlay_renderer.ResetCameraClippingRange()
 
@@ -718,13 +725,67 @@ class MprViewer(BaseViewer):
             bounds,
         )
 
+    def _reset_zoom_baseline(self) -> None:
+        """Store the fitted camera scale as the zoom baseline."""
+        camera = self.renderer.GetActiveCamera()
+        self._base_parallel_scale = camera.GetParallelScale()
+        self._zoom_factor = 1.0
+
+        logger.debug(
+            "[MprViewer:%s] Zoom baseline reset: parallel_scale=%.3f",
+            self._plane.value,
+            self._base_parallel_scale,
+        )
+
+    def set_zoom_factor(self, factor: float) -> None:
+        """Set MPR zoom relative to the initial fitted parallel scale."""
+        if self._image_data is None:
+            logger.debug("[MprViewer:%s] set_zoom_factor ignored: image not loaded.",
+                         self._plane.value)
+            return
+
+        if self._base_parallel_scale is None:
+            logger.warning("[MprViewer:%s] set_zoom_factor ignored: no zoom baseline.",
+                           self._plane.value)
+            return
+
+        clamped = max(self._min_zoom_factor, min(float(factor), self._max_zoom_factor))
+        if clamped == self._zoom_factor:
+            return
+
+        camera = self.renderer.GetActiveCamera()
+        camera.SetParallelScale(self._base_parallel_scale / clamped)
+        self._zoom_factor = clamped
+
+        self.renderer.ResetCameraClippingRange()
+        self.overlay_renderer.ResetCameraClippingRange()
+
+        logger.debug("[MprViewer:%s] Zoom factor set: factor=%.3f, parallel_scale=%.3f",
+                     self._plane.value,
+                     self._zoom_factor,
+                     camera.GetParallelScale(),
+                     )
+        self.update_view()
+
+    def adjust_zoom_by_steps(self, steps: int) -> None:
+        """Adjust zoom factor by Mouse-wheel steps."""
+        if steps == 0:
+            return
+
+        self.set_zoom_factor(self._zoom_factor * (self._zoom_step ** int(steps)))
+
+    def reset_zoom(self) -> None:
+        """Reset MPR zoom to the initial fitted view."""
+        self.set_zoom_factor(1.0)
+
     def set_slice_index(self, index: int) -> None:
         """Set the current slice index for the active plane and refresh the view.
 
         The inpt index is clamped to the valid range: [_slice_min, _slice_max].
         """
         if self._image_data is None:
-            logger.debug("set_slice_index ignored because imag is not loaded.")
+            logger.debug("[MprViewer:%s] set_slice_index ignored because image is not loaded.",
+                         self._plane.value)
             return
 
         clamped_index = max(self._slice_min, min(int(index), self._slice_max))
@@ -733,7 +794,8 @@ class MprViewer(BaseViewer):
 
         self._slice_index = clamped_index
         self._update_reslice()
-        self._setup_camera(self._plane)
+        self.renderer.ResetCameraClippingRange()
+        self.overlay_renderer.ResetCameraClippingRange()
         self._sync_plane_overlay_text()
         self._refresh_crosshair_overlay(render=False)
         self.update_view()
