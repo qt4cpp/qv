@@ -28,6 +28,7 @@ class ViewerSpy:
         self.adjust_calls: list[tuple[int, int]] = []
         self.scroll_calls: list[int] = []
         self.sync_calls: list[tuple[int, int, bool]] = []
+        self.zoom_calls: list[int] = []
 
     def adjust_window_settings(self, dx: int, dy: int) -> None:
         """Record WW/WL adjustments requests."""
@@ -46,6 +47,10 @@ class ViewerSpy:
         """Record Shift-drag sync requests."""
         self.sync_calls.append((point.x, point.y, shift_pressed))
         return True
+
+    def adjust_zoom_by_steps(self, steps: int) -> None:
+        """Record zoom adjustments requests."""
+        self.zoom_calls.append(steps)
 
 
 class FakeInteractor:
@@ -244,3 +249,36 @@ def test_shift_drag_mouse_move_continuously_requests_sync(
         (70, 90, True),
     ]
     assert style._last_pos == (70, 90)
+
+
+def test_shift_mouse_wheel_zooms_without_scrolling(
+        loaded_viewer: ViewerSpy,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    style = MprInteractorStyle(loaded_viewer)
+    fake_interactor = FakeInteractor([(0, 0)], shift_key=True)
+
+    monkeypatch.setattr(MprInteractorStyle, "GetInteractor", lambda self: fake_interactor)
+
+    style.on_mouse_wheel_forward(None, None)
+    style.on_mouse_wheel_backward(None, None)
+
+    assert loaded_viewer.zoom_calls == [+1, -1]
+    assert loaded_viewer.scroll_calls == []
+
+
+def test_left_drag_srcolls_slices_by_accumulated_vertical_motion(
+            loaded_viewer: ViewerSpy,
+            monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        style = MprInteractorStyle(loaded_viewer)
+        fake_interactor = FakeInteractor([(10, 10), (10, 13), (10, 18), (10, 26)])
+
+        monkeypatch.setattr(MprInteractorStyle, "GetInteractor", lambda self: fake_interactor)
+
+        style.on_left_button_down(None, None)
+        style.on_mouse_move(None, None)
+        style.on_mouse_move(None, None)
+        style.on_mouse_move(None, None)
+
+        assert loaded_viewer.scroll_calls == [-1, -1]

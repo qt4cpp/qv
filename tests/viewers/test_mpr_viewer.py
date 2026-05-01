@@ -277,12 +277,12 @@ def test_crosshair_slice_reference_ignores_own_plane(
 
 def test_world_to_slice_index_uses_viewer_plane_axis(mpr_viewer, sample_image_data):
     """
-    The viewer should convert a canonical world point inti a local slice index
+    The viewer should convert a canonical world point init a local slice index
     using its own plane axis.
     """
     mpr_viewer.set_image_data(sample_image_data)
 
-    assert mpr_viewer.world_to_slice_index(WorldPosition(x=-9.3, y=-18.4, z=0.0)) == 2
+    assert mpr_viewer.world_to_slice_index(WorldPosition(x=-9.3, y=-18.4, z=8.0)) == 2
 
 
 def test_request_sync_at_qt_position_emits_sync_request(
@@ -296,7 +296,7 @@ def test_request_sync_at_qt_position_emits_sync_request(
     picked_world = WorldPosition(x=1.5, y=2.5, z=3.5)
     monkeypatch.setattr(
         mpr_viewer,
-        "pick_world_position_from_display",
+        "pick_world_position_from_qt_display",
         lambda point: picked_world,
     )
 
@@ -377,3 +377,15 @@ def test_world_to_slice_index_uses_patient_frame_for_oriented_image(
             z=patient_point[2],
         )
     ) == 3
+
+
+def test_slice_change_preserves_mpr_zoom(mpr_viewer, sample_image_data) -> None:
+    mpr_viewer.set_image_data(sample_image_data)
+
+    mpr_viewer.set_zoom_factor(2.0)
+    before = mpr_viewer.renderer.GetActiveCamera().GetParallelScale()
+
+    mpr_viewer.scroll_slice(+1)
+
+    after = mpr_viewer.renderer.GetActiveCamera().GetParallelScale()
+    assert after == before
