@@ -138,13 +138,23 @@ class MprInteractorStyle(vtkInteractorStyleImage):
 
             lx, ly = self._last_pos
             dy = y - ly
-            self._slice_drag_accumulated_y -= dy
 
-            steps = int(self._slice_drag_accumulated_y / self._slice_drag_pixels_per_slice)
-            if steps != 0:
-                self._viewer.scroll_slice(steps)
-                self._slice_drag_accumulated_y -= steps * self._slice_drag_pixels_per_slice
-                logger.debug("[MprInteractorStyle] Slice drag scroll steps=%d", steps)
+            # VTK display Y grows upward. Positive dy makes upward drag positive.
+            self._slice_drag_accumulated_y += dy
+
+            visual_steps = int(self._slice_drag_accumulated_y / self._slice_drag_pixels_per_slice)
+            if visual_steps != 0:
+                self._viewer.scroll_slice_by_patient_drag(visual_steps)
+                self._slice_drag_accumulated_y -= (visual_steps * self._slice_drag_pixels_per_slice)
+                logger.debug(
+                    "[MprInteractorStyle] Slice drag scroll visual_steps=%d",
+                    visual_steps
+                )
+            # steps = int(self._slice_drag_accumulated_y / self._slice_drag_pixels_per_slice)
+            # if steps != 0:
+            #     self._viewer.scroll_slice(steps)
+            #     self._slice_drag_accumulated_y -= steps * self._slice_drag_pixels_per_slice
+            #     logger.debug("[MprInteractorStyle] Slice drag scroll steps=%d", steps)
 
             self._last_pos = (x, y)
             return

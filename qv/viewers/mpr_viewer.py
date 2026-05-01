@@ -57,6 +57,17 @@ PLANE_AXES_INDEX: dict[MprPlane, int] = {
     MprPlane.SAGITTAL: 0,
 }
 
+# Upward slice drag target in patient-coordinate sign.
+# LPS-like internal coordinates
+# - Axial:   Superior = -Z
+# - Coronal: Anterior = -Y
+# - Sagittal: Left    = +X
+UP_DRAG_PATIENT_COORD_SIGN: dict[MprPlane, int] = {
+    MprPlane.AXIAL: -1,
+    MprPlane.CORONAL: -1,
+    MprPlane.SAGITTAL: +1,
+}
+
 # Crosshair uses other viewers' current slice positions.
 # Order is (vertical_line_source_lane, horizontal_line_source_plane).
 CROSSHAIR_REFERENCE_PLANE: dict[MprPlane, tuple[MprPlane, MprPlane]] = {
@@ -810,6 +821,82 @@ class MprViewer(BaseViewer):
             return
 
         self.set_slice_index(self._slice_index + int(delta))
+
+    def scroll_slice_by_patient_drag(self, visual_steps: int) -> None:
+        """
+        Scroll slices from vertical left_drag steps using Patient Orientation.
+
+        visual_steps > 0 means upward drag.
+        visual_steps < 0 means downward drag.
+
+        Direction policy:
+        - Axial: upward -> Superior, downward -> Inferior
+        - Coronal: upward -> Anterior, downward -> Posterior
+        - Sagittal: upward -> Left, downward -> Right
+        """
+        if self._image_data is None:
+            logger.debug(
+                "[MprViewer:%s] Patient drag ignored: image not loaded.",
+                self._plane.value,
+            )
+            return
+
+        steps = int(visual_steps)
+        if steps == 0:
+            return
+
+        index_direction = self._slice_index_direction_for_upward_patient_drag()
+        delta = steps * index_direction
+
+        logger.debug(
+            "[MprViewer:%s] Patient drag: visual_steps=%d, index_direction=%d, delta=%d",
+            self._plane.value,
+            steps,
+            index_direction,
+            delta,
+        )
+        self.scroll_slice(delta)
+
+
+    def _slice_index_direction_for_upward_patient_drag(self) -> int:
+        """
+        Return +1 or -1 so upward drag moves toward the plane-specific patient direction.
+        """
+        if self._image_data is None:
+            return 1
+
+        if self._slice_min == self._slice_max:
+            return 1
+
+        current_index = self._slice_index
+        if current_index < self._slice_max:
+            neighbor_index = current_index + 1
+        else:
+            neighbor_index = current_index - 1
+
+        current_coord = self._slice_patient_axis_coordinate(current_index)
+        neighbor_coord = self._slice_patient_axis_coordinate(neighbor_index)
+
+        index_delta = neighbor_index - current_index
+        coord_delta_per_index = (neighbor_coord - current_coord) / index_delta
+
+        target_sign = UP_DRAG_PATIENT_COORD_SIGN[self._plane]
+        direction = 1 if coord_delta_per_index * target_sign > 0 else -1
+
+        logger.debug(
+            "[MprViewer:%s] Upward drag direction resolved: coord_delta_per_index=%.6f, "
+            "target_sign=%d, index_direction=%d",
+            self._plane.value,
+            coord_delta_per_index,
+            target_sign,
+            direction,
+        )
+        return direction
+
+    def _slice_patient_axis_coordinate(self, slice_index: int) -> float:
+        """Return the patient axis coordinate for the given slice index."""
+        point = self._slice_origin_for_plane(self._plane, slice_index)
+        return patient_axis_coordinate(self._plane.value, point)
 
     def get_slice_count(self) -> int:
         """Return the number of slices in the current plane."""
