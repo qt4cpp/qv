@@ -114,11 +114,14 @@ python def set_image_data(self, image_data: vtkImageData) -> None: """VolumeView
 - `_reslice.SetInputData(image_data)` で参照を渡す（DeepCopyしない）
 - 画像の extent / spacing / origin からスライス範囲を計算し、初期スライス位置を中央に設定
 - パイプライン構築後に `_update_reslice()` を呼ぶ
-
-### 断面切り替え
 ```
 
-python def set_plane(self, plane: MprPlane) -> None: """表示断面を切り替える。スライス位置は新断面の中央にリセットする。"""``` 
+### 断面切り替え
+
+```python
+def set_plane(self, plane: MprPlane) -> None:
+  """表示断面を切り替える。スライス位置は新断面の中央にリセットする。"""
+``` 
 
 - `_plane` を更新
 - `_reslice` の方向コサイン・カメラ方向を再設定
