@@ -84,14 +84,18 @@ def oriented_sample_image_data(sample_image_data):
 
     direction = vtk.vtkMatrix3x3()
     direction.Identity()
+
+    # source i -> patient P
     direction.SetElement(0, 0, 0.0)
     direction.SetElement(1, 0, 1.0)
     direction.SetElement(2, 0, 0.0)
 
-    direction.SetElement(0, 1, 1.0)
+    # source j -> Patient S/I axis
+    direction.SetElement(0, 1, 0.0)
     direction.SetElement(1, 1, 0.0)
-    direction.SetElement(2, 1, 0.0)
+    direction.SetElement(2, 1, 1.0)
 
+    # source k-> Patient L
     direction.SetElement(0, 2, 1.0)
     direction.SetElement(1, 2, 0.0)
     direction.SetElement(2, 2, 0.0)

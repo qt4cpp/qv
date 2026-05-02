@@ -114,11 +114,14 @@ python def set_image_data(self, image_data: vtkImageData) -> None: """VolumeView
 - `_reslice.SetInputData(image_data)` で参照を渡す（DeepCopyしない）
 - 画像の extent / spacing / origin からスライス範囲を計算し、初期スライス位置を中央に設定
 - パイプライン構築後に `_update_reslice()` を呼ぶ
-
-### 断面切り替え
 ```
 
-python def set_plane(self, plane: MprPlane) -> None: """表示断面を切り替える。スライス位置は新断面の中央にリセットする。"""``` 
+### 断面切り替え
+
+```python
+def set_plane(self, plane: MprPlane) -> None:
+  """表示断面を切り替える。スライス位置は新断面の中央にリセットする。"""
+``` 
 
 - `_plane` を更新
 - `_reslice` の方向コサイン・カメラ方向を再設定
@@ -158,17 +161,125 @@ def _update_reslice(self) -> None:
 ### `setup_interactor_style()`
 
 MPR ビューワーでは 3D 回転は不要。  
-VTK 標準の `vtkInteractorStyleImage` を使用し、以下を有効にする:
+`vtkInteractorStyleImage` を継承した `MprInteractorStyle` を使用し、MPR 専用の 2D 操作を定義する。
 
-- **マウスホイール**: `scroll_slice()` 呼び出し
-- **左ドラッグ**: スライス移動（パン）
-- **右ドラッグ**: Window/Level 調整（将来実装）
+### 操作仕様
 
-### `MprInteractorStyle`（将来拡張）
+| 操作 | 挙動 | 備考 |
+|---|---|---|
+| マウスホイール | スライス移動 | ホイール用のスライス移動方向設定に従う |
+| Shift + マウスホイール | 拡大 / 縮小 | 2D MPR のため `vtkCamera` の `ParallelScale` を変更する |
+| 左ドラッグ上下 | スライス移動 | ドラッグ用のスライス移動方向設定に従う |
+| 右ドラッグ | Window/Level 調整 | 横移動を Window、縦移動を Level に割り当てる |
+| 左ダブルクリック | MPR 同期 | 指定位置を基準に他 MPR のスライスを同期する |
+| Shift + 左ドラッグ | 連続 MPR 同期 | ドラッグ中のカーソル位置を基準に他 MPR を追従させる |
 
-将来的に独自の `InteractorStyle` が必要になれば  
-`qv/viewers/interactor_styles/mpr_interactor_style.py` に切り出す。  
-現時点では `vtkInteractorStyleImage` の Observer で対応する。
+### スライス移動方向オプション
+
+スライス移動方向は、左ドラッグとマウスホイールで個別に設定できるようにする。  
+どちらの操作も、以下の 2 つの方向モードを選択できる。
+
+| GUI 表示名 | 内部値 | 挙動 |
+|---|---|---|
+| 患者方向に合わせる | `patient_orientation` | Patient Orientation を基準にスライス移動方向を決定する |
+| スライス番号順に移動する | `slice_index` | slice index の増減方向をそのままスライス移動方向にする |
+
+設定項目は以下とする。
+
+| 設定 | 対象操作 | 設定キー案 |
+|---|---|---|
+| スライスドラッグ方向 | 左ドラッグ上下 | `mpr/slice_drag_direction_mode` |
+| ホイールスライス方向 | マウスホイール | `mpr/wheel_slice_direction_mode` |
+
+デフォルト値はどちらも `patient_orientation` とする。  
+設定はアプリ全体で共有し、すべての MPR viewer に適用する。
+
+`patient_orientation` では、断面ごとの患者方向に従って移動する。  
+`slice_index` では、患者方向を考慮せず、入力操作を slice index の増減に直接対応させる。
+
+### スライスドラッグ
+
+左ドラッグ単体ではパンではなくスライス移動を行う。  
+ドラッグ中の上下移動量を累積し、一定ピクセル数を超えたタイミングで `scroll_slice()` を呼び出す。
+
+- 細かいマウス移動で過剰にスライスが飛ばないよう、ピクセル閾値を設ける。
+- 閾値未満の移動量は次の `MouseMoveEvent` に持ち越す。
+- スライス移動方向は「スライスドラッグ方向」設定に従う。
+
+「患者方向に合わせる」場合、ドラッグ方向とスライス移動方向は断面ごとに以下とする。
+
+| Plane | 上ドラッグ | 下ドラッグ |
+|---|---|---|
+| Axial | Superior 方向へ移動 | Inferior 方向へ移動 |
+| Coronal | Anterior 方向へ移動 | Posterior 方向へ移動 |
+| Sagittal | Left 方向へ移動 | Right 方向へ移動 |
+
+この方向定義は画面上の上下方向ではなく、各断面のスライス軸に対する患者座標上の移動方向を示す。  
+実装では現在の断面・画像 orientation・slice index の増減方向を照合し、上記の患者方向に一致するよう `scroll_slice()` の符号を決定する。
+
+「スライス番号順に移動する」場合は、上ドラッグで slice index を増やし、下ドラッグで slice index を減らす。
+
+### ホイールスライス移動
+
+Shift を押していないマウスホイールではスライス移動を行う。  
+スライス移動方向は「ホイールスライス方向」設定に従う。
+
+「患者方向に合わせる」場合、ホイール方向とスライス移動方向は断面ごとに以下とする。
+
+| Plane | wheel forward | wheel backward |
+|---|---|---|
+| Axial | Superior 方向へ移動 | Inferior 方向へ移動 |
+| Coronal | Anterior 方向へ移動 | Posterior 方向へ移動 |
+| Sagittal | Left 方向へ移動 | Right 方向へ移動 |
+
+「スライス番号順に移動する」場合は、wheel forward で slice index を増やし、wheel backward で slice index を減らす。
+
+Shift + マウスホイールはズーム操作として扱うため、「ホイールスライス方向」設定の対象外とする。
+
+### ズーム
+
+Shift + マウスホイールでは MPR 画像の拡大 / 縮小を行う。  
+MPR は平行投影の 2D ビューであるため、カメラ距離ではなく `vtkCamera.SetParallelScale()` で表示倍率を制御する。
+
+- `Shift + wheel forward`: 拡大
+- `Shift + wheel backward`: 縮小
+- ズーム倍率は過剰な拡大 / 縮小を避けるため、最小値・最大値でクランプする。
+- スライス変更時にズーム状態はリセットしない。
+- plane 切り替えや画像読み込み時は、初期表示に合わせてズーム基準を再設定する。
+
+ズームリセットは独立した機能として別途定義する。  
+将来的には UI 操作、ショートカット、コンテキストメニューなどから現在の MPR viewer のズームだけを初期表示に戻せるようにする。
+
+### ズームリセット
+
+ズームリセットは `VolumeViewer` と同じ操作モデルで提供する。  
+メニューや将来実装するボタンから呼び出せるよう、`MprViewer` 側にも `VolumeViewer` と揃えたズーム API を持たせる。
+
+```python
+def set_zoom_factor(self, factor: float) -> None:
+    """初期表示を 1.0 とした倍率で MPR 表示をズームする。"""
+
+def reset_zoom(self) -> None:
+    """MPR 表示を初期フィット状態に戻す。"""
+```
+
+MPR は平行投影の 2D ビューであるため、`VolumeViewer` のようにカメラ距離を変更せず、初期フィット時の `ParallelScale` を基準値として保持する。
+
+- 画像読み込み後、初期フィット時の `ParallelScale` をズーム基準値として保存する。
+- `set_zoom_factor(1.0)` および `reset_zoom()` は、その基準値へ戻す。
+- スライス変更時はズーム基準値を更新しない。
+- スライス変更時は現在のズーム倍率を維持する。
+- plane 切り替えや画像読み込み時は、表示対象が変わるためズーム基準値を再設定する。
+
+UI からの呼び出しは後続実装とする。  
+ただし今回のズーム実装では、メニューやボタンが viewer 種別を意識しすぎないよう、`MprViewer` に `reset_zoom()` API を用意しておく。
+
+4画面構成でのリセット対象は UI 仕様として別途決める。
+
+- アクティブな MPR viewer のみをリセットする。
+- 全 MPR viewer をまとめてリセットする。
+- VolumeViewer と MPR viewer を個別にリセットする。
+- すべての viewer をまとめてリセットする。
 
 ---
 

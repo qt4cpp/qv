@@ -57,6 +57,17 @@ PLANE_AXES_INDEX: dict[MprPlane, int] = {
     MprPlane.SAGITTAL: 0,
 }
 
+# Upward slice drag target in patient-coordinate sign.
+# LPS-like internal coordinates
+# - Axial:   Superior = -Z
+# - Coronal: Anterior = -Y
+# - Sagittal: Left    = +X
+UP_DRAG_PATIENT_COORD_SIGN: dict[MprPlane, int] = {
+    MprPlane.AXIAL: -1,
+    MprPlane.CORONAL: -1,
+    MprPlane.SAGITTAL: +1,
+}
+
 # Crosshair uses other viewers' current slice positions.
 # Order is (vertical_line_source_lane, horizontal_line_source_plane).
 CROSSHAIR_REFERENCE_PLANE: dict[MprPlane, tuple[MprPlane, MprPlane]] = {
@@ -96,6 +107,12 @@ class MprViewer(BaseViewer):
         self._slice_index: int = 0
         self._slice_min: int = 0
         self._slice_max: int = 0
+
+        self._base_parallel_scale: float | None = None
+        self._zoom_factor: float = 1.0
+        self._min_zoom_factor: float = 0.1
+        self._max_zoom_factor: float = 10.0
+        self._zoom_step: float = 1.15
 
         self._reslice: vtk.vtkImageReslice | None = None
         self._wl_map: vtk.vtkImageMapToWindowLevelColors | None = None
@@ -708,6 +725,7 @@ class MprViewer(BaseViewer):
         camera.OrthogonalizeViewUp()
 
         self.renderer.ResetCamera()
+        self._reset_zoom_baseline()
         self.renderer.ResetCameraClippingRange()
         self.overlay_renderer.ResetCameraClippingRange()
 
@@ -718,13 +736,67 @@ class MprViewer(BaseViewer):
             bounds,
         )
 
+    def _reset_zoom_baseline(self) -> None:
+        """Store the fitted camera scale as the zoom baseline."""
+        camera = self.renderer.GetActiveCamera()
+        self._base_parallel_scale = camera.GetParallelScale()
+        self._zoom_factor = 1.0
+
+        logger.debug(
+            "[MprViewer:%s] Zoom baseline reset: parallel_scale=%.3f",
+            self._plane.value,
+            self._base_parallel_scale,
+        )
+
+    def set_zoom_factor(self, factor: float) -> None:
+        """Set MPR zoom relative to the initial fitted parallel scale."""
+        if self._image_data is None:
+            logger.debug("[MprViewer:%s] set_zoom_factor ignored: image not loaded.",
+                         self._plane.value)
+            return
+
+        if self._base_parallel_scale is None:
+            logger.warning("[MprViewer:%s] set_zoom_factor ignored: no zoom baseline.",
+                           self._plane.value)
+            return
+
+        clamped = max(self._min_zoom_factor, min(float(factor), self._max_zoom_factor))
+        if clamped == self._zoom_factor:
+            return
+
+        camera = self.renderer.GetActiveCamera()
+        camera.SetParallelScale(self._base_parallel_scale / clamped)
+        self._zoom_factor = clamped
+
+        self.renderer.ResetCameraClippingRange()
+        self.overlay_renderer.ResetCameraClippingRange()
+
+        logger.debug("[MprViewer:%s] Zoom factor set: factor=%.3f, parallel_scale=%.3f",
+                     self._plane.value,
+                     self._zoom_factor,
+                     camera.GetParallelScale(),
+                     )
+        self.update_view()
+
+    def adjust_zoom_by_steps(self, steps: int) -> None:
+        """Adjust zoom factor by Mouse-wheel steps."""
+        if steps == 0:
+            return
+
+        self.set_zoom_factor(self._zoom_factor * (self._zoom_step ** int(steps)))
+
+    def reset_zoom(self) -> None:
+        """Reset MPR zoom to the initial fitted view."""
+        self.set_zoom_factor(1.0)
+
     def set_slice_index(self, index: int) -> None:
         """Set the current slice index for the active plane and refresh the view.
 
         The inpt index is clamped to the valid range: [_slice_min, _slice_max].
         """
         if self._image_data is None:
-            logger.debug("set_slice_index ignored because imag is not loaded.")
+            logger.debug("[MprViewer:%s] set_slice_index ignored because image is not loaded.",
+                         self._plane.value)
             return
 
         clamped_index = max(self._slice_min, min(int(index), self._slice_max))
@@ -733,7 +805,8 @@ class MprViewer(BaseViewer):
 
         self._slice_index = clamped_index
         self._update_reslice()
-        self._setup_camera(self._plane)
+        self.renderer.ResetCameraClippingRange()
+        self.overlay_renderer.ResetCameraClippingRange()
         self._sync_plane_overlay_text()
         self._refresh_crosshair_overlay(render=False)
         self.update_view()
@@ -748,6 +821,82 @@ class MprViewer(BaseViewer):
             return
 
         self.set_slice_index(self._slice_index + int(delta))
+
+    def scroll_slice_by_patient_drag(self, visual_steps: int) -> None:
+        """
+        Scroll slices from vertical left_drag steps using Patient Orientation.
+
+        visual_steps > 0 means upward drag.
+        visual_steps < 0 means downward drag.
+
+        Direction policy:
+        - Axial: upward -> Superior, downward -> Inferior
+        - Coronal: upward -> Anterior, downward -> Posterior
+        - Sagittal: upward -> Left, downward -> Right
+        """
+        if self._image_data is None:
+            logger.debug(
+                "[MprViewer:%s] Patient drag ignored: image not loaded.",
+                self._plane.value,
+            )
+            return
+
+        steps = int(visual_steps)
+        if steps == 0:
+            return
+
+        index_direction = self._slice_index_direction_for_upward_patient_drag()
+        delta = steps * index_direction
+
+        logger.debug(
+            "[MprViewer:%s] Patient drag: visual_steps=%d, index_direction=%d, delta=%d",
+            self._plane.value,
+            steps,
+            index_direction,
+            delta,
+        )
+        self.scroll_slice(delta)
+
+
+    def _slice_index_direction_for_upward_patient_drag(self) -> int:
+        """
+        Return +1 or -1 so upward drag moves toward the plane-specific patient direction.
+        """
+        if self._image_data is None:
+            return 1
+
+        if self._slice_min == self._slice_max:
+            return 1
+
+        current_index = self._slice_index
+        if current_index < self._slice_max:
+            neighbor_index = current_index + 1
+        else:
+            neighbor_index = current_index - 1
+
+        current_coord = self._slice_patient_axis_coordinate(current_index)
+        neighbor_coord = self._slice_patient_axis_coordinate(neighbor_index)
+
+        index_delta = neighbor_index - current_index
+        coord_delta_per_index = (neighbor_coord - current_coord) / index_delta
+
+        target_sign = UP_DRAG_PATIENT_COORD_SIGN[self._plane]
+        direction = 1 if coord_delta_per_index * target_sign > 0 else -1
+
+        logger.debug(
+            "[MprViewer:%s] Upward drag direction resolved: coord_delta_per_index=%.6f, "
+            "target_sign=%d, index_direction=%d",
+            self._plane.value,
+            coord_delta_per_index,
+            target_sign,
+            direction,
+        )
+        return direction
+
+    def _slice_patient_axis_coordinate(self, slice_index: int) -> float:
+        """Return the patient axis coordinate for the given slice index."""
+        point = self._slice_origin_for_plane(self._plane, slice_index)
+        return patient_axis_coordinate(self._plane.value, point)
 
     def get_slice_count(self) -> int:
         """Return the number of slices in the current plane."""
