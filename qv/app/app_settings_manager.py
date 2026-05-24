@@ -26,6 +26,16 @@ class RunMode(str, Enum):
         return self.value
 
 
+class SliceNavigationDirectionMode(str, Enum):
+    PATIENT_ORIENTATION = "patient_orientation"
+    SLICE_INDEX = "slice_index"
+
+    def __str__(self):
+        return self.value
+    def __repr__(self):
+        return self.value
+
+
 # ----------------------
 # デフォルト設定
 # ----------------------
@@ -37,7 +47,12 @@ base_defaults: Dict[str, Any] = {
     "view": {
         "rotation_step_deg": 5.0,
     },
+    "mpr": {
+        "slice_drag_direction_mode": SliceNavigationDirectionMode.PATIENT_ORIENTATION.value,
+        "wheel_slice_direction_mode": SliceNavigationDirectionMode.PATIENT_ORIENTATION.value,
+    },
 }
+
 
 class SettingsError(RuntimeError):
     """Raised when strict settings loading fails (dev/CI)."""
@@ -55,9 +70,20 @@ class ViewConfig:
     rotation_step_deg: float = 5.0
 
 @dataclass
+class MPRConfig:
+    slice_drag_direction_mode: SliceNavigationDirectionMode = (
+        SliceNavigationDirectionMode.PATIENT_ORIENTATION
+    )
+    wheel_slice_direction_mode: SliceNavigationDirectionMode = (
+            SliceNavigationDirectionMode.PATIENT_ORIENTATION
+    )
+
+@dataclass
 class AppSettingsData:
     general: GeneralConfig = field(default_factory=GeneralConfig)
     view: ViewConfig = field(default_factory=ViewConfig)
+    mpr: MPRConfig = field(default_factory=MPRConfig)
+
 
 # ----------------------
 # Utility
@@ -97,6 +123,21 @@ def _validate_rotation_step(v: Any) -> float:
     except Exception:
         return fallback
     return f if (0 < f <= 90) else fallback
+
+def _validate_slice_navigation_direction_mode(
+        v: Any,
+        *,
+        fallback_key: str,
+) -> SliceNavigationDirectionMode:
+    """Validate slice navigation direction."""
+    if isinstance(v, SliceNavigationDirectionMode):
+        return v
+
+    fallback = base_defaults["mpr"][fallback_key]
+    try:
+        return SliceNavigationDirectionMode(str(v).strip().lower())
+    except ValueError:
+        return SliceNavigationDirectionMode(fallback)
 
 
 # ---------------------
@@ -148,6 +189,14 @@ class AppSettingsManager:
         return self._data.view.rotation_step_deg
 
     @property
+    def mpr_slice_drag_direction_mode(self) -> SliceNavigationDirectionMode:
+        return self._data.mpr.slice_drag_direction_mode
+
+    @property
+    def mpr_wheel_slice_direction_mode(self) -> SliceNavigationDirectionMode:
+        return self._data.mpr.wheel_slice_direction_mode
+
+    @property
     def warnings(self) -> tuple[str, ...]:
         """Non-fatal settings load problems (production fallback path)."""
         return tuple(self._warnings)
@@ -176,16 +225,34 @@ class AppSettingsManager:
         self._settings.setValue("view/rotation_step_deg", rot)
         self._data.view.rotation_step_deg = rot
 
+    def set_mpr_slice_drag_direction_mode(self, v: str | SliceNavigationDirectionMode):
+        mode = _validate_slice_navigation_direction_mode(
+            v,
+            fallback_key="slice_drag_direction_mode",
+        )
+        self._settings.setValue("mpr/slice_drag_direction_mode", mode.value)
+        self._data.mpr.slice_drag_direction_mode = mode
+
+    def set_mpr_wheel_slice_direction_mode(self, v: str | SliceNavigationDirectionMode):
+        mode = _validate_slice_navigation_direction_mode(
+            v,
+            fallback_key="wheel_slice_direction_mode",
+        )
+        self._settings.setValue("mpr/wheel_slice_direction_mode", mode.value)
+        self._data.mpr.wheel_slice_direction_mode = mode
+
+
     # Reset
     def reset_all_to_default(self) -> None:
         """ユーザー設定を全削除（ショートカットは別管理）"""
         self._settings.remove("general")
         self._settings.remove("view")
+        self._settings.remove("mpr")
         self._data = self._load_effective()
 
     def reset_section(self, section: str) -> None:
         """特定のセクションのみを規定値へ"""
-        if section not in ("general", "view"):
+        if section not in ("general", "view", "mpr"):
             raise ValueError(f"Invalid section: {section}")
         self._settings.remove(section)
         self._data = self._load_effective()
@@ -194,8 +261,11 @@ class AppSettingsManager:
         data = {
             "general": asdict(self._data.general),
             "view": asdict(self._data.view),
+            "mpr": asdict(self._data.mpr),
         }
         data["general"]["run_mode"] = self._data.general.run_mode.value
+        data["mpr"]["slice_drag_direction_mode"] = self._data.mpr.slice_drag_direction_mode.value
+        data["mpr"]["wheel_slice_direction_mode"] = self._data.mpr.wheel_slice_direction_mode.value
         return data
 
     def dump_effective_settings(self) -> str:
@@ -262,9 +332,21 @@ class AppSettingsManager:
             warnings=self._warnings,
         )
         if viewer_json:
-            # allow either {"view": {...}} or flat
-            if "view" in viewer_json and isinstance(viewer_json.get("view"), dict):
-                merged = _deep_merge(merged, viewer_json)
+            # allow either {"view": {...}, "mpr": {...}} or flat
+            known_sections = {"general", "view", "mpr"}
+            has_section = any(
+                section in viewer_json and isinstance(viewer_json.get(section), dict)
+                for section in known_sections
+            )
+            if has_section:
+                merged = _deep_merge(
+                    merged,
+                    {
+                        section: viewer_json[section]
+                        for section in known_sections
+                        if section in viewer_json
+                    },
+                )
             else:
                 merged = _deep_merge(merged, {"view": viewer_json})
         return merged
@@ -296,7 +378,23 @@ class AppSettingsManager:
         if v is not None:
             vw["rotation_step_deg"] = _validate_rotation_step(v)
 
-        return {"general": g, "view": vw}
+        # mpr
+        mpr = dict(base.get("mpr", {}))
+        v = self._settings.value("mpr/slice_drag_direction_mode", None)
+        if v is not None:
+            mpr["slice_drag_direction_mode"] = _validate_slice_navigation_direction_mode(
+                v,
+                fallback_key="slice_drag_direction_mode",
+            ).value
+
+        v = self._settings.value("mpr/wheel_slice_direction_mode", None)
+        if v is not None:
+            mpr["wheel_slice_direction_mode"] = _validate_slice_navigation_direction_mode(
+                v,
+                fallback_key="wheel_slice_direction_mode",
+            ).value
+
+        return {"general": g, "view": vw, "mpr": mpr}
 
     def _make_model_from(self,
                          merged: dict[str, Any],
@@ -308,6 +406,7 @@ class AppSettingsManager:
         """
         g = merged.get("general", {})
         vw = merged.get("view", {})
+        mpr = merged.get("mpr", {})
         return AppSettingsData(
             general=GeneralConfig(
                 run_mode=_validate_run_mode(g.get("run_mode",
@@ -318,5 +417,17 @@ class AppSettingsManager:
             view=ViewConfig(
                 rotation_step_deg=_validate_rotation_step(vw.get("rotation_step_deg",
                                                                  base_defaults["view"]["rotation_step_deg"]))
+            ),
+            mpr=MPRConfig(
+                slice_drag_direction_mode=_validate_slice_navigation_direction_mode(
+                    mpr.get("slice_drag_direction_mode",
+                            base_defaults["mpr"]["slice_drag_direction_mode"]),
+                    fallback_key="slice_drag_direction_mode",
+                ),
+                wheel_slice_direction_mode=_validate_slice_navigation_direction_mode(
+                    mpr.get("wheel_slice_direction_mode",
+                            base_defaults["mpr"]["wheel_slice_direction_mode"]),
+                    fallback_key="wheel_slice_direction_mode",
+                ),
             ),
         )
