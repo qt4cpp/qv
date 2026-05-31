@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from PySide6 import QtWidgets
 
+from qv.app.app_settings_manager import SliceNavigationDirectionMode
 from qv.core.window_settings import WindowSettings
 from qv.core.patient_geometry import PatientFrame, build_patient_frame
 from qv.viewers.coordinates import QtDisplayPoint
@@ -389,3 +390,77 @@ def test_slice_change_preserves_mpr_zoom(mpr_viewer, sample_image_data) -> None:
 
     after = mpr_viewer.renderer.GetActiveCamera().GetParallelScale()
     assert after == before
+
+
+def test_drag_direction_slice_index_mode_maps_input_directly(
+        mpr_viewer,
+        sample_image_data,
+        settings_manager,
+) -> None:
+    """
+    In slice-index mode, upward drag increments the slice index directly.
+    """
+    settings_manager.set_mpr_slice_drag_direction_mode(
+        SliceNavigationDirectionMode.SLICE_INDEX
+    )
+    mpr_viewer.set_image_data(sample_image_data)
+
+    mpr_viewer.scroll_slice_by_drag_steps(+1)
+
+    assert mpr_viewer.slice_index == 2
+
+
+def test_drag_direction_patient_orientation_mode_uses_patient_direction(
+        mpr_viewer,
+        sample_image_data,
+        settings_manager,
+) -> None:
+    """
+    In patient-orientation mode, upward axial drag moves toward Superior.
+    """
+    settings_manager.set_mpr_slice_drag_direction_mode(
+        SliceNavigationDirectionMode.PATIENT_ORIENTATION
+    )
+    mpr_viewer.set_image_data(sample_image_data)
+
+    mpr_viewer.scroll_slice_by_drag_steps(+1)
+
+    # For the sample image, Superior maps to decreasing axial slice index.
+    assert mpr_viewer.slice_index == 0
+
+
+def test_wheel_direction_slice_index_mode_maps_input_directly(
+        mpr_viewer,
+        sample_image_data,
+        settings_manager,
+) -> None:
+    """
+    In slice-index mode, wheel forward increments the slice index directly.
+    """
+    settings_manager.set_mpr_wheel_slice_direction_mode(
+        SliceNavigationDirectionMode.SLICE_INDEX
+    )
+    mpr_viewer.set_image_data(sample_image_data)
+
+    mpr_viewer.scroll_slice_by_wheel_steps(+1)
+
+    assert mpr_viewer.slice_index == 2
+
+
+def test_wheel_direction_patient_orientation_mode_uses_patient_direction(
+        mpr_viewer,
+        sample_image_data,
+        settings_manager,
+) -> None:
+    """
+    In patient-orientation mode, wheel forward moves toward Superior for Axial.
+    """
+    settings_manager.set_mpr_wheel_slice_direction_mode(
+        SliceNavigationDirectionMode.PATIENT_ORIENTATION
+    )
+    mpr_viewer.set_image_data(sample_image_data)
+
+    mpr_viewer.scroll_slice_by_wheel_steps(+1)
+
+    # For the sample image, Superior maps to decreasing axial slice index.
+    assert mpr_viewer.slice_index == 0

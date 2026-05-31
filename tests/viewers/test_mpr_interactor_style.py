@@ -27,6 +27,8 @@ class ViewerSpy:
         )
         self.adjust_calls: list[tuple[int, int]] = []
         self.scroll_calls: list[int] = []
+        self.drag_calls: list[int] = []
+        self.wheel_calls: list[int] = []
         self.sync_calls: list[tuple[int, int, bool]] = []
         self.zoom_calls: list[int] = []
 
@@ -37,6 +39,14 @@ class ViewerSpy:
     def scroll_slice(self, delta: int) -> None:
         """Record slice scrolling requests."""
         self.scroll_calls.append(delta)
+
+    def scroll_slice_by_drag_steps(self, visual_steps: int) -> None:
+        """Record configured drag navigation requests."""
+        self.drag_calls.append(visual_steps)
+
+    def scroll_slice_by_wheel_steps(self, wheel_steps: int) -> None:
+        """Record configured wheel navigation requests."""
+        self.wheel_calls.append(wheel_steps)
 
     def request_sync_at_vtk_position(
             self,
@@ -142,13 +152,14 @@ def test_mouse_move_adjusts_window_settings_only_during_active_drag(
 def test_mouse_wheel_scrolls_slice_forward_and_backward(
         loaded_viewer: ViewerSpy,
 ) -> None:
-    """Wheel events should be converted into relative slice movement."""
+    """Wheel events should be routed to the viewer wheel-navigation API."""
     style = MprInteractorStyle(loaded_viewer)
 
     style.on_mouse_wheel_forward(None, None)
     style.on_mouse_wheel_backward(None, None)
 
-    assert loaded_viewer.scroll_calls == [+1, -1]
+    assert loaded_viewer.wheel_calls == [+1, -1]
+    assert loaded_viewer.scroll_calls == []
 
 
 def test_unloaded_viewers_ignores_drag_and_wheel_events(
@@ -174,6 +185,8 @@ def test_unloaded_viewers_ignores_drag_and_wheel_events(
 
     assert unloaded_viewer.adjust_calls == []
     assert unloaded_viewer.scroll_calls == []
+    assert unloaded_viewer.drag_calls == []
+    assert unloaded_viewer.wheel_calls == []
 
 
 def test_right_button_release_finishes_drag_and_stops_followup_adjustments(
@@ -265,9 +278,10 @@ def test_shift_mouse_wheel_zooms_without_scrolling(
 
     assert loaded_viewer.zoom_calls == [+1, -1]
     assert loaded_viewer.scroll_calls == []
+    assert loaded_viewer.wheel_calls == []
 
 
-def test_left_drag_srcolls_slices_by_accumulated_vertical_motion(
+def test_left_drag_scrolls_slices_by_accumulated_vertical_motion(
             loaded_viewer: ViewerSpy,
             monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -281,4 +295,6 @@ def test_left_drag_srcolls_slices_by_accumulated_vertical_motion(
         style.on_mouse_move(None, None)
         style.on_mouse_move(None, None)
 
-        assert loaded_viewer.scroll_calls == [-1, -1]
+        # +8 pixels and +8 pixels -> two upward visual steps.
+        assert loaded_viewer.drag_calls == [+1, +1]
+        assert loaded_viewer.scroll_calls == []
