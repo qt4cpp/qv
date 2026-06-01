@@ -22,8 +22,14 @@ class FakeVolumeViewer(QtWidgets.QWidget):
     def source_image(self):
         return self._source_image
 
-    def set_source_image(self, image) -> None:
+    @property
+    def patient_frame(self):
+        """Expose the patient frame using the production VolumeViewer API."""
+        return self._patient_frame
+
+    def set_source_image(self, image, patient_frame=None) -> None:
         self._source_image = image
+        self._patient_frame = patient_frame
 
     def set_window_settings(self, settings: WindowSettings) -> None:
         self.window_settings = settings
@@ -32,6 +38,7 @@ class FakeVolumeViewer(QtWidgets.QWidget):
 
 class FakeMprViewer(QtWidgets.QWidget):
     sliceChanged = QtCore.Signal(object, int)
+    syncRequested = QtCore.Signal(object)
     windowSettingsChanged = QtCore.Signal(object)
 
     def __init__(
@@ -55,7 +62,8 @@ class FakeMprViewer(QtWidgets.QWidget):
         self.crosshair_refs: dict[MprPlane, int] = {}
         self.render_count = 0
 
-    def set_image_data(self, image) -> None:
+    def set_image_data(self, image, patient_frame=None) -> None:
+        """Record shared image distribution using the production API shape."""
         self.received_images.append(image)
 
     def set_window_settings(self, settings: WindowSettings) -> None:
@@ -91,6 +99,31 @@ class FakeMprViewer(QtWidgets.QWidget):
 
     def update_view(self) -> None:
         self.render_count += 1
+
+
+def test_multi_viewer_panel_shares_settings_manager_with_all_viewer(
+        monkeypatch: pytest.MonkeyPatch,
+        qtbot,
+) -> None:
+    """
+    All viewers must use the panel-level settings manager.
+
+    This allows settings changed by the dialog to affect existing MPR viewer
+    instances without rebuilding the panel.
+    """
+    monkeypatch.setattr(multi_viewer_panel_module, "VolumeViewer", FakeVolumeViewer)
+    monkeypatch.setattr(multi_viewer_panel_module, "MprViewer", FakeMprViewer)
+
+    settings_manager = object()
+    panel = multi_viewer_panel_module.MultiViewerPanel(settings_mgr=settings_manager)
+    qtbot.addWidget(panel)
+
+    assert panel.setting is settings_manager
+    assert panel.volume_viewer._settings_manager is settings_manager
+    assert all(
+        viewer.settings_manager is settings_manager
+        for viewer in panel.mpr_viewers.values()
+    )
 
 
 def test_multi_viewer_panel_builds_fixed_four_view_layout(

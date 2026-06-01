@@ -61,7 +61,7 @@ def test_preference_action_opens_settings_dialog_with_shared_manager(
         monkeypatch: pytest.MonkeyPatch,
         qtbot,
 ) -> None:
-    FakeSettingsDialog.instance.clear()
+    FakeSettingsDialog.instances.clear()
 
     monkeypatch.setattr(mainwindow_module, "ShortcutManager", FakeShortcutManager)
     monkeypatch.setattr(mainwindow_module, "SettingsDialog", FakeSettingsDialog)
@@ -74,6 +74,7 @@ def test_preference_action_opens_settings_dialog_with_shared_manager(
                         "_register_shortcuts",
                         lambda self: None,
                         )
+
     settings_manager = object()
     window = mainwindow_module.MainWindow(settings_mgr=settings_manager)
     qtbot.addWidget(window)
@@ -82,8 +83,8 @@ def test_preference_action_opens_settings_dialog_with_shared_manager(
 
     window.settings_action.trigger()
 
-    assert len(FakeSettingsDialog.instance) == 1
-    dialog = FakeSettingsDialog.instance[0]
+    assert len(FakeSettingsDialog.instances) == 1
+    dialog = FakeSettingsDialog.instances[0]
     assert dialog.settings_manager is settings_manager
     assert dialog.parent is window
     assert dialog.exec_calls == 1

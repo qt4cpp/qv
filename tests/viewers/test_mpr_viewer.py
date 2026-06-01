@@ -464,3 +464,56 @@ def test_wheel_direction_patient_orientation_mode_uses_patient_direction(
 
     # For the sample image, Superior maps to decreasing axial slice index.
     assert mpr_viewer.slice_index == 0
+
+
+def test_existing_viewer_uses_updated_drag_direction_settings(
+        mpr_viewer,
+        sample_image_data,
+        settings_manager,
+) -> None:
+    """
+    Drag settings changes must affect an existing viewer on its next operation.
+    """
+    settings_manager.set_mpr_slice_drag_direction_mode(
+        SliceNavigationDirectionMode.PATIENT_ORIENTATION
+    )
+    mpr_viewer.set_image_data(sample_image_data)
+
+    # The sample Axial viewer starts at index 1. Superior resolves to index -1.
+    mpr_viewer.scroll_slice_by_drag_steps(+1)
+
+    assert mpr_viewer.slice_index == 0
+
+    settings_manager.set_mpr_slice_drag_direction_mode(
+        SliceNavigationDirectionMode.SLICE_INDEX
+    )
+
+    # The same viewer now maps upward drag directly to index +1.
+    mpr_viewer.scroll_slice_by_drag_steps(+1)
+    assert mpr_viewer.slice_index == 1
+
+
+def test_existing_viewer_uses_updated_wheel_direction_settings(
+        mpr_viewer,
+        sample_image_data,
+        settings_manager,
+) -> None:
+    """
+    Wheel settings changes must affect an existing viewer on its next operation.
+    """
+    settings_manager.set_mpr_wheel_slice_direction_mode(
+        SliceNavigationDirectionMode.PATIENT_ORIENTATION
+    )
+    mpr_viewer.set_image_data(sample_image_data)
+
+    # The sample Axial viewer starts at index 1. Superior resolves to index -1.
+    mpr_viewer.scroll_slice_by_wheel_steps(+1)
+    assert mpr_viewer.slice_index == 0
+
+    settings_manager.set_mpr_wheel_slice_direction_mode(
+        SliceNavigationDirectionMode.SLICE_INDEX
+    )
+
+    # The same viewer now maps wheel forward directly to index +1.
+    mpr_viewer.scroll_slice_by_wheel_steps(+1)
+    assert mpr_viewer.slice_index == 1
