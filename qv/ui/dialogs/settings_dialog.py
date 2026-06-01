@@ -13,8 +13,8 @@ from qv.app.app_settings_manager import (
 logger = logging.getLogger(__name__)
 
 
-_DRECTION_MODE_OPTIONS = (
-("Match patinet orientation", SliceNavigationDirectionMode.PATIENT_ORIENTATION),
+_DIRECTION_MODE_OPTIONS = (
+("Match patient orientation", SliceNavigationDirectionMode.PATIENT_ORIENTATION),
 ("Follow slice number order", SliceNavigationDirectionMode.SLICE_INDEX),
 )
 
@@ -82,7 +82,7 @@ class SettingsDialog(QtWidgets.QDialog):
     def _create_direction_combo(self, parent: QtWidgets.QWidget) -> QtWidgets.QComboBox:
         """Create a combo box for selecting direction options."""
         combo = QtWidgets.QComboBox(parent)
-        for label, mode in _DRECTION_MODE_OPTIONS:
+        for label, mode in _DIRECTION_MODE_OPTIONS:
             combo.addItem(label, mode.value)
         return combo
 
