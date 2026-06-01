@@ -15,6 +15,7 @@ from qv.app.shortcut_manager import ShortcutManager
 from qv.viewers.mpr_viewer import MprViewer, MprPlane
 from qv.ui.widgets.histgram_widget import HistogramWidget
 from qv.ui.widgets.multi_viewer_panel import MultiViewerPanel, ViewerLayoutMode
+from qv.ui.dialogs.settings_dialog import SettingsDialog
 import qv.utils.vtk_helpers as vtk_helpers
 import copy
 
@@ -196,6 +197,12 @@ class MainWindow(QMainWindow):
         self.redo_action.triggered.connect(self._redo)
         edit_menu.addAction(self.redo_action)
 
+        edit_menu.addSeparator()
+
+        self.settings_action = QAction("&Preferences...", self)
+        self.settings_action.triggered.connect(self._open_settings_dialog)
+        edit_menu.addAction(self.settings_action)
+
         self._update_undo_redo_enabled()
 
     def _on_select_perf_profile(self, profile_name: str, checked: bool) -> None:
@@ -301,6 +308,15 @@ class MainWindow(QMainWindow):
     # =====================================================
     # Menu Actions
     # =====================================================
+
+    def _open_settings_dialog(self) -> None:
+        """Open the application settings dialog with the shared settings manager."""
+        logger.debug("Opening application settings dialog")
+        dialog = SettingsDialog(
+            settings_manager=self.setting,
+            parent=self,
+        )
+        dialog.exec()
 
     @log_io(level=logging.INFO)
     def open_file(self) -> None:

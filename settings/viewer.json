@@ -1,5 +1,9 @@
 {
   "view": {
-    "rotation_step_deg": 2.0
+    "rotation_step_deg": 5.0
+  },
+  "mpr": {
+    "slice_drag_direction_mode": "patient_orientation",
+    "wheel_slice_direction_mode": "patient_orientation"
   }
 }

@@ -23,6 +23,8 @@ patient_axis_coordinate,
 from qv.viewers.base_viewer import BaseViewer
 from qv.viewers.coordinates import QtDisplayPoint, VtkDisplayPoint, qt_to_vtk_display
 from qv.viewers.interactor_styles.mpr_interactor_style import MprInteractorStyle
+from qv.app.app_settings_manager import SliceNavigationDirectionMode
+
 
 logger = logging.getLogger(__name__)
 
@@ -822,8 +824,58 @@ class MprViewer(BaseViewer):
 
         self.set_slice_index(self._slice_index + int(delta))
 
+    def scroll_slice_by_drag_steps(self, visual_steps: int) -> None:
+        """
+        Scroll slices from vertical left-drag in VTK display using the configured direction mode.
+
+        visual_steps > 0 means upward drag in VTK display coordinate.
+        visual_steps < 0 means downward rag.
+        """
+        steps = int(visual_steps)
+        if steps == 0:
+            return
+
+        mode = self.setting.mpr_slice_drag_direction_mode
+        if mode == SliceNavigationDirectionMode.SLICE_INDEX:
+            # Slice-index mode maps input directly to index movement.
+            self.scroll_slice(steps)
+            return
+
+        self._scroll_slice_by_patient_navigation_steps(
+            steps,
+            source_label="drag",
+        )
+
+    def scroll_slice_by_wheel_steps(self, wheel_steps: int) -> None:
+        """
+        Scroll slices from mouse-hweel steps using the configured direction mode.
+
+        wheel_steps > 0 means wheel forward.
+        wheel_steps < 0 means wheel backward.
+        Shift+wheel is handled by the interactor style as zoom and does not call this.
+        """
+        steps = int(wheel_steps)
+        if steps == 0:
+            return
+
+        mode = self.setting.mpr_wheel_slice_direction_mode
+        if mode == SliceNavigationDirectionMode.SLICE_INDEX:
+            # Slice-index mode maps wheel forward/backward directly to +/- index.
+            self.scroll_slice(steps)
+            return
+
+        self._scroll_slice_by_patient_navigation_steps(
+            steps,
+            source_label="wheel",
+        )
+
     def scroll_slice_by_patient_drag(self, visual_steps: int) -> None:
         """
+        Backward-compatible patient-orientation drag API
+
+        New input paths should call scroll_slice_by_drag_steps(), which applies
+        the AppSettingsManager direction mode before reaching this behavior.
+
         Scroll slices from vertical left_drag steps using Patient Orientation.
 
         visual_steps > 0 means upward drag.
@@ -834,33 +886,52 @@ class MprViewer(BaseViewer):
         - Coronal: upward -> Anterior, downward -> Posterior
         - Sagittal: upward -> Left, downward -> Right
         """
+        self._scroll_slice_by_patient_navigation_steps(
+            int(visual_steps),
+            source_label="patient-drag",
+        )
+
+    def _scroll_slice_by_patient_navigation_steps(
+            self,
+            steps: int,
+            *,
+            source_label: str,
+    ) -> None:
+        """
+        Scroll slices so positive input moves toward the plane-specific patient direction.
+
+        Positive input means:
+        - upward drag for left-drag navigation
+        -wheel forward for wheel navigation.
+        """
         if self._image_data is None:
             logger.debug(
-                "[MprViewer:%s] Patient drag ignored: image not loaded.",
+                "[MprViewer:%s] Patient %s ignored: image not loaded.",
                 self._plane.value,
+                source_label,
             )
             return
 
-        steps = int(visual_steps)
         if steps == 0:
             return
 
-        index_direction = self._slice_index_direction_for_upward_patient_drag()
+        index_direction = self._slice_index_direction_for_patient_forward_navigation()
         delta = steps * index_direction
 
-        logger.debug(
-            "[MprViewer:%s] Patient drag: visual_steps=%d, index_direction=%d, delta=%d",
-            self._plane.value,
-            steps,
-            index_direction,
-            delta,
-        )
+        logger.debug("[MprViewer:%s] Patient %s: steps=%d, index_direction=%s, delta=%d",
+                     self._plane.value,
+                     source_label,
+                     steps,
+                     index_direction,
+                     delta,
+                     )
         self.scroll_slice(delta)
 
-
-    def _slice_index_direction_for_upward_patient_drag(self) -> int:
+    def _slice_index_direction_for_patient_forward_navigation(self) -> int:
         """
         Return +1 or -1 so upward drag moves toward the plane-specific patient direction.
+
+        Positive input corresponds to upward drag or wheel forward.
         """
         if self._image_data is None:
             return 1
@@ -892,6 +963,12 @@ class MprViewer(BaseViewer):
             direction,
         )
         return direction
+
+    def _slice_index_direction_for_upward_patient_drag(self) -> int:
+        """
+        Compatibility wrapper for older tests/callers.
+        """
+        return self._slice_index_direction_for_patient_forward_navigation()
 
     def _slice_patient_axis_coordinate(self, slice_index: int) -> float:
         """Return the patient axis coordinate for the given slice index."""

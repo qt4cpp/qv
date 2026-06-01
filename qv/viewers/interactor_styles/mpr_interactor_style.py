@@ -144,17 +144,12 @@ class MprInteractorStyle(vtkInteractorStyleImage):
 
             visual_steps = int(self._slice_drag_accumulated_y / self._slice_drag_pixels_per_slice)
             if visual_steps != 0:
-                self._viewer.scroll_slice_by_patient_drag(visual_steps)
+                self._viewer.scroll_slice_by_drag_steps(visual_steps)
                 self._slice_drag_accumulated_y -= (visual_steps * self._slice_drag_pixels_per_slice)
                 logger.debug(
                     "[MprInteractorStyle] Slice drag scroll visual_steps=%d",
                     visual_steps
                 )
-            # steps = int(self._slice_drag_accumulated_y / self._slice_drag_pixels_per_slice)
-            # if steps != 0:
-            #     self._viewer.scroll_slice(steps)
-            #     self._slice_drag_accumulated_y -= steps * self._slice_drag_pixels_per_slice
-            #     logger.debug("[MprInteractorStyle] Slice drag scroll steps=%d", steps)
 
             self._last_pos = (x, y)
             return
@@ -184,7 +179,7 @@ class MprInteractorStyle(vtkInteractorStyleImage):
             self._viewer.adjust_zoom_by_steps(+1)
             return
 
-        self._viewer.scroll_slice(+1)
+        self._viewer.scroll_slice_by_wheel_steps(+1)
 
     def  on_mouse_wheel_backward(self, obj, event) -> None:
         """Move one slice backward when image data is loaded."""
@@ -196,4 +191,4 @@ class MprInteractorStyle(vtkInteractorStyleImage):
             self._viewer.adjust_zoom_by_steps(-1)
             return
 
-        self._viewer.scroll_slice(-1)
+        self._viewer.scroll_slice_by_wheel_steps(-1)
