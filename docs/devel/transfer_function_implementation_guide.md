@@ -167,3 +167,11 @@
 - ROIベースの局所TF調整
 - 設定の永続化（`AppSettingsManager` 連携）
 
+
+---
+
+## 10. 関連仕様
+
+CT の部位・観察目的別 Transfer Function preset の設計仕様は以下を参照する。
+
+- `docs/devel/transfer_function_presets_spec.md`
