@@ -10,7 +10,6 @@ import numpy as np
 import vtk
 from PySide6 import QtCore
 from PySide6.QtCore import QEvent
-from fontTools.colorLib import geometry
 from vtkmodules.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 
 import qv.utils.vtk_helpers as vtk_helpers
@@ -29,6 +28,11 @@ from vtkmodules.vtkCommonDataModel import vtkImplicitSelectionLoop
 from qv.core.history import Command, HistoryManager
 from qv.core.states import ClippingState
 from qv.viewers.performance_profile import PerformanceProfile, get_profile
+from qv.viewers.transfer_functions import (
+    build_transfer_function_points,
+    get_transfer_function_preset,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +104,9 @@ class VolumeViewer(BaseViewer):
         # Performance profile state
         self._performance_profile: PerformanceProfile = get_profile("quality")
         self._interactive_quality_enabled: bool = False
+
+        # Transfer function preset state
+        self._transfer_function_preset_name: str = "default_linear"
 
         super().__init__(settings_manager=settings_manager, parent=parent)
         self.vtk_widget.installEventFilter(self)
@@ -593,17 +600,20 @@ class VolumeViewer(BaseViewer):
         if self.color_func is None or self.opacity_func is None:
             return False
 
-        min_val, max_val = settings.get_range()
+        preset = get_transfer_function_preset(self._transfer_function_preset_name)
+        points = build_transfer_function_points(
+            preset=preset,
+            window_settings=settings,
+            clipped_scalar=CLIPPED_SCALAR
+        )
 
         self.color_func.RemoveAllPoints()
-        self.color_func.AddRGBPoint(CLIPPED_SCALAR, 0.0, 0.0, 0.0)
-        self.color_func.AddRGBPoint(min_val, 0.0, 0.0, 0.0)
-        self.color_func.AddRGBPoint(max_val, 1.0, 1.0, 1.0)
+        for scalar, red, green, blue in points.color_points:
+            self.color_func.AddRGBPoint(scalar, red, green, blue)
 
         self.opacity_func.RemoveAllPoints()
-        self.opacity_func.AddPoint(CLIPPED_SCALAR, 0.0)
-        self.opacity_func.AddPoint(min_val, 0.0)
-        self.opacity_func.AddPoint(max_val, 1.0)
+        for scalar, opacity in points.opacity_points:
+            self.opacity_func.AddPoint(scalar, opacity)
 
         return True
 

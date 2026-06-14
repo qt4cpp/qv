@@ -33,6 +33,20 @@ class TransferFunctionPreset:
     source: str = SOURCE_BUILTIN
 
 
+@dataclass(frozen=True)
+class TransferFunctionPoints:
+    """
+    Concrete transfer function points ready to be applied to VTK functions.
+
+    color_points are `(scalar, r, g, b)` tuples.
+    opacity_points and gradient_opacity_points are `(scalar, opacity)` tuples.
+    """
+
+    color_points: tuple[tuple[float, float, float, float], ...]
+    opacity_points: tuple[tuple[float, float], ...]
+    gradient_opacity_points: tuple[tuple[float, float], ...] = ()
+
+
 def validate_transfer_function_preset(preset: TransferFunctionPreset) -> None:
     """Validate a transfer function preset and raise ValueError on failure."""
     if not preset.name.strip():
@@ -168,6 +182,47 @@ def get_transfer_function_preset(name: str) -> TransferFunctionPreset:
         raise ValueError(
             f"unknown preset: {name}. Valid presets: {valid}"
         ) from exc
+
+
+def build_transfer_function_points(
+        *,
+        preset: TransferFunctionPreset,
+        window_settings: WindowSettings,
+        clipped_scalar: float,
+) -> TransferFunctionPoints:
+    """
+    Build concrete TF points from a preset and active window settings.
+
+    default_linear is intentionally special-cased to preserve the previous
+    VolumeViewer behavior exactly: window min maps to black/transparent and
+    window max maps to white/opaque.
+    """
+    if preset.name == "default_linear":
+        min_val, max_val = window_settings.get_range()
+        return TransferFunctionPoints(
+            color_points=(
+                (clipped_scalar, 0.0, 0.0, 0.0),
+                (min_val, 0.0, 0.0, 0.0),
+                (max_val, 1.0, 1.0, 1.0),
+            ),
+            opacity_points=(
+                (clipped_scalar, 0.0),
+                (min_val, 0.0),
+                (max_val, 1.0),
+            ),
+        )
+
+    return TransferFunctionPoints(
+        color_points=(
+            (clipped_scalar, 0.0, 0.0, 0.0),
+            *preset.color_points,
+        ),
+        opacity_points=(
+            (clipped_scalar, 0.0),
+            *preset.opacity_points,
+        ),
+        gradient_opacity_points=preset.gradient_opacity_points,
+    )
 
 
 def _validate_unique_names(presets: Iterable[TransferFunctionPreset]) -> None:

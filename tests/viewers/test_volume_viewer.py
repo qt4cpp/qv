@@ -29,15 +29,15 @@ def test_default_linear_transfer_function_matches_existing_window_mapping():
     )
 
     assert points.color_points == (
-    (CLIPPED_SCALAR, 0.0, 0.0, 0.0),
-    (-100.0, 0.0, 0.0, 0.0),
-    (300.0, 1.0, 1.0, 1.0),
+        (CLIPPED_SCALAR, 0.0, 0.0, 0.0),
+        (-100.0, 0.0, 0.0, 0.0),
+        (300.0, 1.0, 1.0, 1.0),
     )
 
     assert points.opacity_points == (
-    (CLIPPED_SCALAR, 0.0),
-    (-100.0, 0.0),
-    (300.0, 1.0),
+        (CLIPPED_SCALAR, 0.0),
+        (-100.0, 0.0),
+        (300.0, 1.0),
     )
 
 
