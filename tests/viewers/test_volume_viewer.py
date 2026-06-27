@@ -88,7 +88,7 @@ def test_default_linear_transfer_function_keeps_clipped_scalar_transparent():
 def _make_volume_viewer_api_stub(
         *,
         scalar_range: tuple[float, float] | None = (-1000.0, 3000.0),
-        window_settings:WindowSettings | None = WindowSettings(level=100.0, width=400.0),
+        window_settings: WindowSettings | None = WindowSettings(level=100.0, width=400.0),
 ):
     """
     Build a lightweight VolumeViewer instance for API tests.
@@ -204,7 +204,7 @@ def test_trasfer_function_preset_can_return_to_default_linear():
 
 
 def test_set_transfer_function_preset_can_skip_render():
-    """Callers should be able to batch preset changes withut immediate render."""
+    """Callers should be able to batch preset changes without immediate render."""
     viewer, calls = _make_volume_viewer_api_stub()
 
     viewer.set_transfer_function_preset("ct_head_brain", render=False)
