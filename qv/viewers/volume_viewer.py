@@ -31,6 +31,7 @@ from qv.viewers.performance_profile import PerformanceProfile, get_profile
 from qv.viewers.transfer_functions import (
     build_transfer_function_points,
     get_transfer_function_preset,
+    list_transfer_function_presets,
 )
 
 
@@ -433,6 +434,43 @@ class VolumeViewer(BaseViewer):
     @property
     def current_profile_name(self) -> str:
         return self._performance_profile.name
+
+    @property
+    def current_transfer_function_preset_name(self) -> str:
+        """Return the active transfer function preset name."""
+        return self._transfer_function_preset_name
+
+    def available_transfer_function_presets(self) -> tuple[str, ...]:
+        """Return available transfer function preset names in stable UI order."""
+        return tuple(preset.name for preset in list_transfer_function_presets())
+
+    def set_transfer_function_preset(self, name: str, *, render: bool = True) -> None:
+        """
+        Set the active transfer function preset.
+
+        The preset name is accepted even before volume data is loaded. If data is
+        already loaded, the preset's default window is applied first and the transfer
+        functions are rebuilt once with the active WindowSettings.
+        """
+        preset = get_transfer_function_preset(name)
+        if preset.name == self._transfer_function_preset_name:
+            return
+
+        self._transfer_function_preset_name = preset.name
+
+        if self.scalar_range is None:
+            return
+
+        if preset.default_window is not None:
+            self.set_window_settings(preset.default_window, render=False)
+
+        settings = self.window_settings
+        if settings is None:
+            return
+
+        changed = self._apply_window_settings(settings)
+        if changed and render:
+            self.update_view()
 
     @property
     def source_image(self) -> vtk.vtkImageData | None:
