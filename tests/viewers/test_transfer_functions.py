@@ -7,6 +7,9 @@ added in the next commit.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from qv.core.window_settings import WindowSettings
@@ -151,3 +154,135 @@ def test_get_transfer_function_preset_rejects_unknown_name():
     """Unknown preset names should fail explicitly instead of silently falling back."""
     with pytest.raises(ValueError, match="unknown_preset"):
         get_transfer_function_preset("unknown_preset")
+
+
+def _write_user_preset_json(path: Path, payload: dict) -> None:
+    """Write a user preset JSON file in the expected external format."""
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _valid_user_preset_payload(*, name: str = "user_abdomen_custom") -> dict:
+    """Build a minimal valid user preset JSON payload."""
+    return {
+        "name": name,
+        "display_name": "User Abdomen Custom",
+        "default_window": {
+            "level": 40.0,
+            "width": 350.0,
+        },
+        "color_points": [
+            [-1000.0, 0.0, 0.0, 0.0],
+            [300.0, 1.0, 0.8, 0.6],
+        ],
+        "opacity_points": [
+            [-1000.0, 0.0],
+            [300.0, 0.6],
+        ],
+        "gradient_opacity_points": [],
+        "scalar_opacity_unit_distance": 1.2,
+    }
+
+
+def test_load_user_transfer_function_presets_loads_valid_json(tmp_path: Path):
+    """Valid user preset JSON should load as user-sourced presets."""
+    from qv.viewers.transfer_functions import load_user_transfer_function_presets
+
+    path = tmp_path / "transfer_function_presets.json"
+    _write_user_preset_json(
+        path,
+        {
+            "schema_version": 1,
+            "presets": [
+                _valid_user_preset_payload(),
+            ],
+        },
+    )
+
+    presets = load_user_transfer_function_presets(path)
+
+    assert len(presets) == 1
+    assert presets[0].name == "user_abdomen_custom"
+    assert presets[0].display_name == "User Abdomen Custom"
+    assert presets[0].default_window == WindowSettings(level=40.0, width=350.0)
+    assert presets[0].source == "user"
+
+
+def test_load_user_transfer_function_presets_rejects_unsupported_schema_version(
+        tmp_path: Path,
+):
+    """Unsupported user preset shema versions should fail explictly."""
+    from qv.viewers.transfer_functions import load_user_transfer_function_presets
+
+    path = tmp_path / "transfer_function_presets.json"
+    _write_user_preset_json(
+        path,
+        {
+            "schema_version": 999,
+            "presets": [
+                _valid_user_preset_payload(),
+            ],
+        },
+    )
+
+    with pytest.raises(ValueError, match="schema_version|schema version"):
+        load_user_transfer_function_presets(path)
+
+
+def test_load_user_transfer_function_presets_rejects_builtin_name_collision(
+        tmp_path: Path,
+):
+    """User presets must not override builtin preset names."""
+    from qv.viewers.transfer_functions import load_user_transfer_function_presets
+
+    path = tmp_path / "transfer_function_presets.json"
+    _write_user_preset_json(
+        path,
+        {
+            "schema_version": 1,
+            "presets": [
+                _valid_user_preset_payload(name="default_linear"),
+            ],
+        },
+    )
+
+    with pytest.raises(ValueError, match="default_linear|builtin|collision"):
+        load_user_transfer_function_presets(path)
+
+
+def test_load_user_transfer_function_presets_rejects_duplicate_user_names(
+        tmp_path: Path,
+):
+    """Duplicate user preset names should be rejected instead of using last-wins."""
+    from qv.viewers.transfer_functions import load_user_transfer_function_presets
+
+    path = tmp_path / "transfer_function_presets.json"
+    _write_user_preset_json(
+        path,
+        {
+            "schema_version": 1,
+            "presets": [
+                _valid_user_preset_payload(name="user_duplicate"),
+                _valid_user_preset_payload(name="user_duplicate"),
+            ],
+        },
+    )
+
+    with pytest.raises(ValueError, match="Duplicate|duplicate|user_duplicate"):
+        load_user_transfer_function_presets(path)
+
+
+def test_build_transfer_function_registry_falls_back_to_builtin_on_broken_json(
+        tmp_path: Path,
+):
+    """Broken user JSON should not make builtin presets unavailable."""
+    from qv.viewers.transfer_functions import build_transfer_function_registry
+
+    path = tmp_path / "transfer_function_presets.json"
+    path.write_text("{ broken json", encoding="utf-8")
+
+    registry = build_transfer_function_registry(user_preset_path=path)
+
+    preset = registry.get("default_linear")
+    assert preset is not None
+    assert preset.name == "default_linear"
+    assert preset.source == "builtin"
