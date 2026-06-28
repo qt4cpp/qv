@@ -66,6 +66,8 @@ class VolumeViewer(BaseViewer):
         self.scalar_range: tuple[float, float] | None = None
         self.color_func: vtk.vtkColorTransferFunction | None = None
         self.opacity_func: vtk.vtkPiecewiseFunction | None = None
+        self.gradient_opacity_func: vtk.vtkPiecewiseFunction | None = None
+        self._default_scalar_opacity_unit_distance: float | None = None
         self.mask_image: vtk.vtkImageData | None = None
 
         self._patient_frame: PatientFrame | None = None
@@ -327,6 +329,9 @@ class VolumeViewer(BaseViewer):
         self.opacity_func = vtk.vtkPiecewiseFunction()
 
         self.volume_property = vtk.vtkVolumeProperty()
+        self._default_scalar_opacity_unit_distance = (
+            self.volume_property.GetScalarOpacityUnitDistance()
+        )
         self.volume_property.SetColor(self.color_func)
         self.volume_property.SetScalarOpacity(self.opacity_func)
         self.volume_property.ShadeOn()
@@ -652,6 +657,42 @@ class VolumeViewer(BaseViewer):
         self.opacity_func.RemoveAllPoints()
         for scalar, opacity in points.opacity_points:
             self.opacity_func.AddPoint(scalar, opacity)
+
+        if self.volume_property is not None:
+            scalar_opacity_unit_distance = (
+                preset.scalar_opacity_unit_distance
+                if preset.scalar_opacity_unit_distance is not None
+                else self._default_scalar_opacity_unit_distance
+            )
+
+            if scalar_opacity_unit_distance is not None:
+                self.volume_property.SetScalarOpacityUnitDistance(
+                    scalar_opacity_unit_distance
+                )
+
+            if points.gradient_opacity_points:
+                gradient_opacity_func = vtk.vtkPiecewiseFunction()
+                for scalar, opacity in points.gradient_opacity_points:
+                    gradient_opacity_func.AddPoint(scalar, opacity)
+
+                self.gradient_opacity_func = gradient_opacity_func
+                self.volume_property.SetGradientOpacity(gradient_opacity_func)
+
+                # Some VTK builds allow gradient opacity to be explicitly disabled.
+                # Re-enable it when a preset provides gradient opacity points.
+                if hasattr(self.volume_property, "DisableGradientOpacityOff"):
+                    self.volume_property.DisableGradientOpacityOff()
+            else:
+                self.gradient_opacity_func = None
+
+                # Avoid leaving a previous preset's gradient opacity active after
+                # switching to a preset that does not provide gradient opacity points.
+                if hasattr(self.volume_property, "DisableGradientOpacityOn"):
+                    self.volume_property.DisableGradientOpacityOn()
+                else:
+                    empty_gradient_opacity_func = vtk.vtkPiecewiseFunction()
+                    self.volume_property.SetGradientOpacity(empty_gradient_opacity_func)
+            self.volume_property.Modified()
 
         return True
 

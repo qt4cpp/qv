@@ -6,11 +6,156 @@ import pytest
 
 from qv.core.window_settings import WindowSettings
 from qv.viewers.volume_viewer import VolumeViewer
+import qv.viewers.volume_viewer as volume_viewer_module
 from qv.operations.clipping.clipping_operation import CLIPPED_SCALAR
 from qv.viewers.transfer_functions import (
+    TransferFunctionPreset,
     build_transfer_function_points,
     get_transfer_function_preset,
 )
+
+
+class _SpyTransferFunction:
+    """
+    Test double for vtkTransferFunction/vtkColorTransferFunction.
+
+    The real VTK objects do not expose a .points attribute. This spy stores
+    AddPoint/AddRGBPoint calls so tests can assert the generated TF data without
+    depending on VTK internals.
+    """
+
+    def __init__(self) -> None:
+        self.points: list[tuple[float, ...]] = []
+        self.remove_all_points_calls = 0
+
+    def RemoveAllPoints(self) -> None:
+        self.remove_all_points_calls += 1
+        self.points.clear()
+
+    def AddRGBPoint(self, scalar: float, red: float, green: float, blue: float) -> None:
+        self.points.append((scalar, red, green, blue))
+
+    def AddPoint(self, scalar: float, opacity: float) -> None:
+        self.points.append((scalar, opacity))
+
+
+class _SpyVolumeProperty:
+    """Collect volume property calls used by transfer function application."""
+
+    def __init__(self) -> None:
+        self.scalar_opacity_unit_distance: float | None = None
+        self.gradient_opacity = None
+        self.disable_gradient_opacity_on_calls = 0
+        self.disable_gradient_opacity_off_calls = 0
+        self.modified_calls = 0
+
+    def SetScalarOpacityUnitDistance(self, distance: float) -> None:
+        self.scalar_opacity_unit_distance = distance
+
+    def SetGradientOpacity(self, func) -> None:
+        self.gradient_opacity = func
+
+    def DisableGradientOpacityOn(self) -> None:
+        self.disable_gradient_opacity_on_calls += 1
+
+    def DisableGradientOpacityOff(self) -> None:
+        self.disable_gradient_opacity_off_calls += 1
+
+    def Modified(self) -> None:
+        self.modified_calls += 1
+
+
+def _make_volume_viewer_transfer_function_stub(
+        *,
+        preset_name: str = "ct_abdomen_soft_tissue",
+        scalar_range: tuple[float, float] = (-1000.0, 3000.0),
+):
+    """Build a lightweight viewer for testing _apply_window_settings directly."""
+    viewer = VolumeViewer.__new__(VolumeViewer)
+    viewer._transfer_function_preset_name = preset_name
+    viewer.scalar_range = scalar_range
+    viewer.color_func = _SpyTransferFunction()
+    viewer.opacity_func = _SpyTransferFunction()
+    viewer.gradient_opacity_func = None
+    viewer.volume_property = _SpyVolumeProperty()
+    viewer._default_scalar_opacity_unit_distance = 1.0
+    return viewer
+
+
+def test_apply_window_settings_applies_scalar_opacity_unit_distance():
+    """Preset ScalarOpacityUnitDistance should be forwarded to vtkVolumeProperty."""
+    viewer = _make_volume_viewer_transfer_function_stub(
+        preset_name="ct_abdomen_soft_tissue",
+    )
+
+    changed = viewer._apply_window_settings(WindowSettings(level=40.0, width=350.0))
+
+    assert changed is True
+    assert viewer.volume_property.scalar_opacity_unit_distance == 1.2
+    assert viewer.volume_property.modified_calls == 1
+
+
+def test_apply_window_settings_disables_gradient_opacity_when_preset_has_no_points():
+    """A preset without gradient opacity should not leave stale gradient opacity active."""
+    viewer = _make_volume_viewer_transfer_function_stub(
+        preset_name="ct_abdomen_soft_tissue",
+    )
+
+    changed = viewer._apply_window_settings(WindowSettings(level=40.0, width=350.0))
+
+    assert changed is True
+    assert viewer.gradient_opacity_func is None
+    assert viewer.volume_property.disable_gradient_opacity_on_calls == 1
+    assert viewer.volume_property.disable_gradient_opacity_off_calls == 0
+
+
+def test_apply_window_settings_applies_gradient_opacity_points(monkeypatch):
+    """Gradient opacity points should be converted to a VTK piecewise function."""
+    preset = TransferFunctionPreset(
+        name="test_gradient",
+        display_name="Test Gradient",
+        default_window=WindowSettings(level=40.0, width=350.0),
+        color_points=(
+            (-1000.0, 0.0, 0.0, 0.0),
+            (300.0, 1.0, 1.0, 1.0),
+        ),
+        opacity_points=(
+            (-1000.0, 0.0),
+            (300.0, 0.6),
+        ),
+        gradient_opacity_points=(
+            (0.0, 0.0),
+            (120.0, 0.35),
+            (600.0, 1.0),
+        ),
+        scalar_opacity_unit_distance=1.4,
+    )
+
+    monkeypatch.setattr(volume_viewer_module,
+                        "get_transfer_function_preset",
+                        lambda _: preset)
+    monkeypatch.setattr(volume_viewer_module.vtk,
+                        "vtkPiecewiseFunction",
+                        lambda: _SpyTransferFunction(), )
+
+    viewer = _make_volume_viewer_transfer_function_stub(
+        preset_name="test_gradient",
+    )
+
+    changed = viewer._apply_window_settings(WindowSettings(level=40.0, width=350.0))
+
+    assert changed is True
+    assert viewer.volume_property.scalar_opacity_unit_distance == 1.4
+    assert viewer.gradient_opacity_func is viewer.volume_property.gradient_opacity
+    assert viewer.volume_property.disable_gradient_opacity_off_calls == 1
+    assert viewer.volume_property.disable_gradient_opacity_on_calls == 0
+
+    gradient_points = viewer.gradient_opacity_func.points
+    assert gradient_points == [
+        (0.0, 0.0),
+        (120.0, 0.35),
+        (600.0, 1.0),
+    ]
 
 
 def test_default_linear_transfer_function_matches_existing_window_mapping():
@@ -183,7 +328,7 @@ def test_set_transfer_function_preset_applies_default_window_and_rerenders():
     assert calls["update_view"] == [True]
 
 
-def test_trasfer_function_preset_can_return_to_default_linear():
+def test_transfer_function_preset_can_return_to_default_linear():
     """Preset switching should allow returning to the compatibility preset."""
     viewer, calls = _make_volume_viewer_api_stub(
         window_settings=WindowSettings(level=40.0, width=80.0),
@@ -231,3 +376,17 @@ def test_set_transfer_function_preset_rejects_unknown_name_without_state_change(
     assert calls["set_window_settings"] == []
     assert calls["apply_window_settings"] == []
     assert calls["update_view"] == []
+
+
+def test_apply_window_settings_restores_default_scalar_opacity_unit_distance():
+    """Presets without ScalarOpacityUnitDistance should restore the VTK default."""
+    viewer = _make_volume_viewer_transfer_function_stub(
+        preset_name="default_linear",
+    )
+
+    viewer.volume_property.scalar_opacity_unit_distance = 1.6
+
+    changed = viewer._apply_window_settings(WindowSettings(level=40.0, width=80.0))
+
+    assert changed is True
+    assert viewer.volume_property.scalar_opacity_unit_distance == 1.0
