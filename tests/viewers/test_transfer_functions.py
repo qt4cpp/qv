@@ -183,6 +183,34 @@ def _valid_user_preset_payload(*, name: str = "user_abdomen_custom") -> dict:
     }
 
 
+def _make_user_preset(
+        *,
+        name: str = "user_saved",
+        display_name: str = "User Saved",
+        source: str = "user",
+        opacity_points: tuple[tuple[float, float], ...] = (
+            (-1000.0, 0.0),
+            (300.0, 0.6),
+        )
+) -> TransferFunctionPreset:
+    """Build a valid user preset for save/load tests."""
+    return TransferFunctionPreset(
+        name=name,
+        display_name=display_name,
+        default_window=WindowSettings(level=40.0, width=350.0),
+        color_points=(
+            (-1000.0, 0.0, 0.0, 0.0),
+            (300.0, 1.0, 0.8, 0.6),
+        ),
+        opacity_points=opacity_points,
+        gradient_opacity_points=(
+            (0.0, 0.0),
+            (120.0, 0.4),
+        ),
+        scalar_opacity_unit_distance=1.2,
+        source=source,
+    )
+
 def test_load_user_transfer_function_presets_loads_valid_json(tmp_path: Path):
     """Valid user preset JSON should load as user-sourced presets."""
     from qv.viewers.transfer_functions import load_user_transfer_function_presets
@@ -286,3 +314,71 @@ def test_build_transfer_function_registry_falls_back_to_builtin_on_broken_json(
     assert preset is not None
     assert preset.name == "default_linear"
     assert preset.source == "builtin"
+
+
+def test_save_user_transfer_function_presets_round_trips_presets(
+        tmp_path: Path,
+):
+    """Saved user presets should load back as equivalent user presets."""
+    from qv.viewers.transfer_functions import (
+        load_user_transfer_function_presets,
+        save_user_transfer_function_presets,
+    )
+
+    path = tmp_path / "transfer_function_presets.json"
+    preset = _make_user_preset()
+
+    save_user_transfer_function_presets(path, (preset,))
+    loaded_presets = load_user_transfer_function_presets(path)
+    assert loaded_presets == (preset,)
+
+
+def test_save_user_transfer_function_presets_writes_schema_version_and_stable_order(
+        tmp_path: Path,
+):
+    """Saved JSON should include schema_version and preserve preset order."""
+    from qv.viewers.transfer_functions import save_user_transfer_function_presets
+
+    path = tmp_path / "transfer_function_presets.json"
+    first = _make_user_preset(name="user_first", display_name="User First")
+    second = _make_user_preset(name="user_second", display_name="User Second")
+
+    save_user_transfer_function_presets(path, (first, second))
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == 1
+    assert [item["name"] for item in payload["presets"]] == [
+        "user_first",
+        "user_second",
+    ]
+
+
+def test_save_user_transfer_function_presets_validates_before_writing(
+        tmp_path: Path,
+):
+    """Invalid user presets should fail before producing a JSON file."""
+    from qv.viewers.transfer_functions import save_user_transfer_function_presets
+
+    path = tmp_path / "transfer_function_presets.json"
+    invalid = _make_user_preset(name="")
+
+    with pytest.raises(ValueError, match="name"):
+        save_user_transfer_function_presets(path, (invalid,))
+
+    assert not path.exists()
+
+
+def test_save_user_transfer_function_presets_excludes_builtin_presets(
+        tmp_path: Path,
+):
+    """Builtin presets should not be written to the user preset JSON file."""
+    from qv.viewers.transfer_functions import save_user_transfer_function_presets
+
+    path = tmp_path / "transfer_function_presets.json"
+    builtin = get_transfer_function_preset("default_linear")
+    user_preset = _make_user_preset()
+
+    save_user_transfer_function_presets(path, (builtin, user_preset))
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert [item["name"] for item in payload["presets"]] == ["user_saved"]

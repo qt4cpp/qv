@@ -112,6 +112,40 @@ def _preset_from_user_json(item: object) -> TransferFunctionPreset:
     return preset
 
 
+def _preset_to_user_json(preset: TransferFunctionPreset) -> dict:
+    """Convert a user preset into the external JSON representation."""
+    return {
+        "name": preset.name,
+        "display_name": preset.display_name,
+        "default_window": _window_settings_to_json(preset.default_window),
+        "color_points": _points_to_json(preset.color_points),
+        "opacity_points": _points_to_json(preset.opacity_points),
+        "gradient_opacity_points": _points_to_json(
+            preset.gradient_opacity_points,
+        ),
+        "scalar_opacity_unit_distance": preset.scalar_opacity_unit_distance,
+    }
+
+
+def _window_settings_to_json(window_settings: WindowSettings | None) -> dict | None:
+    """Convert WindowSettings into the external JSON representation."""
+    if window_settings is None:
+        return None
+
+    return {
+        "level": window_settings.level,
+        "width": window_settings.width,
+    }
+
+
+def _points_to_json(points: Iterable[tuple[float, ...]]) -> list[list[float]]:
+    """Convert immutable point tuples into JSON lists."""
+    return [
+        [float(value) for value in point]
+        for point in points
+    ]
+
+
 def _window_settings_from_json(item: object) -> WindowSettings | None:
     """Convert a default_window JSON object into WindowSettings."""
     if item is None:
@@ -355,6 +389,42 @@ def load_user_transfer_function_presets(
     _validate_user_presets(presets)
 
     return presets
+
+
+def save_user_transfer_function_presets(
+        path: str | Path,
+        presets: Iterable[TransferFunctionPreset],
+) -> None:
+    """
+    Save user transfer function presets to JSON.
+
+    Builtin presets are intentionally excluded from the output. All provided
+    presets are validated before writing so invalid data does not replace a
+    previously valid preset file.
+    """
+    presets = tuple(presets)
+    for preset in presets:
+        validate_transfer_function_preset(preset)
+
+    user_presets = tuple(
+        preset for preset in presets
+        if preset.source == SOURCE_USER
+    )
+
+    payload = {
+        "schema_version": USER_PRESET_SCHEMA_VERSION,
+        "presets": [
+            _preset_to_user_json(preset)
+            for preset in user_presets
+        ],
+    }
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
 def build_transfer_function_registry(
