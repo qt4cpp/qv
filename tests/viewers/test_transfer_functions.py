@@ -210,7 +210,7 @@ def test_load_user_transfer_function_presets_loads_valid_json(tmp_path: Path):
 def test_load_user_transfer_function_presets_rejects_unsupported_schema_version(
         tmp_path: Path,
 ):
-    """Unsupported user preset shema versions should fail explictly."""
+    """Unsupported user preset schema versions should fail explicitly."""
     from qv.viewers.transfer_functions import load_user_transfer_function_presets
 
     path = tmp_path / "transfer_function_presets.json"

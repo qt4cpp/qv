@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import json
+import logging
+from pathlib import Path
 from dataclasses import dataclass
-from typing import Final, Iterable
+from typing import Final, Iterable, Mapping
 
 from qv.core.window_settings import WindowSettings
 
 
+logger = logging.getLogger(__name__)
+
+USER_PRESET_SCHEMA_VERSION: Final[int] = 1
 SOURCE_BUILTIN: Final[str] = "builtin"
 SOURCE_USER: Final[str] = "user"
 VALID_SOURCES: Final[Iterable[str]] = (SOURCE_BUILTIN, SOURCE_USER)
@@ -45,6 +51,140 @@ class TransferFunctionPoints:
     color_points: tuple[tuple[float, float, float, float], ...]
     opacity_points: tuple[tuple[float, float], ...]
     gradient_opacity_points: tuple[tuple[float, float], ...] = ()
+
+
+@dataclass(frozen=True)
+class TransferFunctionRegistry:
+    """Immutable transfer function preset registry."""
+
+    presets: tuple[TransferFunctionPreset, ...]
+
+    def get(self, name: str) -> TransferFunctionPreset | None:
+        """Return a preset by stable name, or None when absent."""
+        key = name.strip().lower()
+        return self._preset_by_name().get(key)
+
+    def names(self) -> tuple[str, ...]:
+        """Return preset names in registry order."""
+        return tuple(preset.name for preset in self.presets)
+
+    def _preset_by_name(self) -> dict[str, TransferFunctionPreset]:
+        return {preset.name.strip().lower(): preset for preset in self.presets}
+
+
+def _preset_from_user_json(item: object) -> TransferFunctionPreset:
+    """Convert one user preset JSON object into a TransferFunctionPreset."""
+
+    if not isinstance(item, Mapping):
+        raise ValueError("User transfer function preset JSON must be an object.")
+
+    try:
+        name = str(item["name"])
+        display_name = str(item["display_name"])
+        default_window = _window_settings_from_json(item.get("default_window"))
+        color_points = _color_points_from_json(item["color_points"])
+        opacity_points = _opacity_points_from_json(item["opacity_points"])
+    except KeyError as exc:
+        raise ValueError(
+            f"User transfer function preset is missing required field: {exc.args[0]}"
+        ) from exc
+
+    gradient_opacity_points = _opacity_points_from_json(
+        item.get("gradient_opacity_points", [])
+    )
+
+    scalar_opacity_unit_distance = item.get("scalar_opacity_unit_distance")
+    if scalar_opacity_unit_distance is not None:
+        scalar_opacity_unit_distance = float(scalar_opacity_unit_distance)
+
+    preset = TransferFunctionPreset(
+        name=name,
+        display_name=display_name,
+        default_window=default_window,
+        color_points=color_points,
+        opacity_points=opacity_points,
+        gradient_opacity_points=gradient_opacity_points,
+        scalar_opacity_unit_distance=scalar_opacity_unit_distance,
+        source=SOURCE_USER,
+    )
+
+    validate_transfer_function_preset(preset)
+    return preset
+
+
+def _window_settings_from_json(item: object) -> WindowSettings | None:
+    """Convert a default_window JSON object into WindowSettings."""
+    if item is None:
+        return None
+
+    if not isinstance(item, Mapping):
+        raise ValueError("default_window must be an object or null.")
+
+    try:
+        return WindowSettings(
+            level=float(item["level"]),
+            width=float(item["width"]),
+        )
+    except KeyError as exc:
+        raise ValueError(
+            f"default_window is missing required field: {exc.args[0]}."
+        ) from exc
+
+
+def _color_points_from_json(
+        items: object,
+) -> tuple[tuple[float, float, float, float], ...]:
+    """Convert JSON color points into normalized scalar/RGB tuples."""
+    if not isinstance(items, list):
+        raise ValueError("color_points must be a list.")
+
+    points: list[tuple[float, float, float, float]] = []
+    for item in items:
+        if not isinstance(item, list | tuple) or len(item) != 4:
+            raise ValueError("color point must be [scalar, r, g, b].")
+
+        scalar, red, green, blue = item
+        points.append((
+            float(scalar),
+            float(red),
+            float(green),
+            float(blue),
+        ))
+
+    return tuple(points)
+
+
+def _opacity_points_from_json(
+        items: object,
+) -> tuple[tuple[float, float], ...]:
+    """Convert JSON opacity-like points into scalar/opacity tuples."""
+    if not isinstance(items, list):
+        raise ValueError("opacity_points must be a list.")
+
+    points: list[tuple[float, float]] = []
+    for item in items:
+        if not isinstance(item, list | tuple) or len(item) != 2:
+            raise ValueError("opacity point must be [scalar, opacity].")
+
+        scalar, opacity = item
+        points.append((float(scalar), float(opacity)))
+
+    return tuple(points)
+
+
+def _validate_user_presets(presets: tuple[TransferFunctionPreset, ...]) -> None:
+    """Validate user preset names against builtin and other user presets."""
+    builtin_names = {preset.name.strip().lower() for preset in _BUILTIN_PRESETS}
+
+    for preset in presets:
+        key = preset.name.strip().lower()
+        if key in builtin_names:
+            raise ValueError(
+                f"User transfer function preset collides with builtin preset: "
+                f"{preset.name}"
+            )
+
+    _validate_unique_names(presets)
 
 
 def validate_transfer_function_preset(preset: TransferFunctionPreset) -> None:
@@ -182,6 +322,65 @@ def get_transfer_function_preset(name: str) -> TransferFunctionPreset:
         raise ValueError(
             f"unknown preset: {name}. Valid presets: {valid}"
         ) from exc
+
+
+def load_user_transfer_function_presets(
+        path: str | Path,
+) -> tuple[TransferFunctionPreset, ...]:
+    """
+    Load user transfer function presets from JSON
+
+    This  function is intentionally strict. Broken or invalid user preset files
+    should be handled by build_transfer_function_registry(), which can fall back
+    to builtin preset.
+    """
+    path = Path(path)
+    with path.open("r", encoding="utf-8") as file:
+        payload = json.load(file)
+
+    if not isinstance(payload, Mapping):
+        raise ValueError("Transfer function preset JSON root must be an object.")
+
+    schema_version = payload.get("schema_version")
+    if schema_version != USER_PRESET_SCHEMA_VERSION:
+        raise ValueError(
+            f"Unsupported transfer function preset schema_version: {schema_version}"
+        )
+
+    raw_presets = payload.get("presets")
+    if not isinstance(raw_presets, list):
+        raise ValueError("Transfer function preset JSON must contain a presets list.")
+
+    presets = tuple(_preset_from_user_json(item) for item in raw_presets)
+    _validate_user_presets(presets)
+
+    return presets
+
+
+def build_transfer_function_registry(
+        user_preset_path: str | Path | None = None,
+) -> TransferFunctionRegistry:
+    """
+    Build a runtime transfer function preset registry.
+
+    Invalid user preset files are ignored so builtin presets remain available.
+    """
+    user_presets: tuple[TransferFunctionPreset, ...] = ()
+
+    if user_preset_path is not None:
+        try:
+            user_presets = load_user_transfer_function_presets(user_preset_path)
+        except Exception:
+            logger.exception(
+                "Failed to load user transfer function presets: %s",
+                user_preset_path,
+            )
+            user_presets = ()
+
+    presets = (*_BUILTIN_PRESETS, *user_presets)
+    _validate_unique_names(presets)
+
+    return TransferFunctionRegistry(presets=presets)
 
 
 def build_transfer_function_points(
