@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QSplitter,
 from qv.app.app_settings_manager import AppSettingsManager
 from qv.utils.resource_paths import settings_dir
 from qv.viewers.camera.camera_state import CameraAngle
+from qv.viewers.transfer_functions import list_transfer_function_presets
 from qv.utils.log_util import log_io
 from qv.app.status import STATUS_FIELDS, StatusField
 from qv.app.shortcut_manager import ShortcutManager
@@ -180,6 +181,29 @@ class MainWindow(QMainWindow):
         if current_profile in self._perf_profile_actions:
             self._perf_profile_actions[current_profile].setChecked(True)
 
+        # Transfer functions
+        view_menu.addSeparator()
+
+        transfer_function_menu = view_menu.addMenu("Transfer Functions")
+
+        self._transfer_function_preset_group = QActionGroup(self)
+        self._transfer_function_preset_group.setExclusive(True)
+        self._transfer_function_preset_actions: dict[str, QAction] = {}
+
+        for preset in list_transfer_function_presets():
+            action = QAction(preset.display_name, self)
+            action.setCheckable(True)
+            action.triggered.connect(
+                lambda checked, name=preset.name: (
+                    self._on_select_transfer_function_preset(name, checked)
+                )
+            )
+            self._transfer_function_preset_group.addAction(action)
+            self._transfer_function_preset_actions[preset.name] = action
+            transfer_function_menu.addAction(action)
+
+        self._sync_transfer_function_preset_menu_state()
+
         # Edit menu
         edit_menu = menubar.addMenu("&Edit")
         edit_menu.addAction("&Clip inside", self._start_clip_inside)
@@ -209,6 +233,26 @@ class MainWindow(QMainWindow):
         if not checked:
             return
         self.volume_viewer.set_profile(profile_name)
+
+    def _on_select_transfer_function_preset(self, preset_name: str, checked: bool) -> None:
+        if not checked:
+            return
+
+        try:
+            self.volume_viewer.set_transfer_function_preset(preset_name)
+        except ValueError:
+            logger.exception("Failed to select transfer function preset: %s", preset_name)
+            self._sync_transfer_function_preset_menu_state()
+            return
+
+        self._sync_transfer_function_preset_menu_state()
+
+    def _sync_transfer_function_preset_menu_state(self) -> None:
+        """Keep the checked transfer function action aligned with the viewer state."""
+        current_preset_name = self.volume_viewer.current_transfer_function_preset_name
+        action = self._transfer_function_preset_actions.get(current_preset_name)
+        if action is not None:
+            action.setChecked(True)
 
     def _on_select_mpr_plane(self, plane: MprPlane, checked: bool) -> None:
         """
