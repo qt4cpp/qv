@@ -330,7 +330,58 @@ CT の部位・観察目的別 Transfer Function preset を、既存表示互換
 
 ---
 
-## 11. `feat(settings): persist selected transfer function preset`
+## 11. `fix(tf): make CT transfer function presets follow WW/WL`
+
+目的: `default_linear` 以外の CT preset でも、右ドラッグによる WW/WL 調整が見た目に反映されるようにする。
+
+背景:
+
+- `default_linear` は active `WindowSettings` から TF point を生成するため、WW/WL 調整で見た目が変わる。
+- CT preset は HU 絶対値の `color_points` / `opacity_points` をそのまま使っているため、WW/WL の値が変わっても TF point が変わらない。
+- UI で preset 選択可能になった後の基本操作性に関わるため、selected preset 永続化より先に仕様を固定する。
+
+対象:
+
+- `qv/viewers/transfer_functions.py`
+- `tests/viewers/test_transfer_functions.py`
+- 必要なら `docs/devel/transfer_function_presets_spec.md`
+
+このコミットでやること:
+
+- `default_linear` は現状互換のまま維持する。
+- `default_window` を持つ非 `default_linear` preset では、preset point の scalar 値を active `WindowSettings` に線形 remap する。
+- remap は `color_points` と `opacity_points` に適用する。
+- `gradient_opacity_points` は勾配値なので WW/WL remap しない。
+- `scalar_opacity_unit_distance` は距離スケールなので WW/WL remap しない。
+- `default_window is None` の非 `default_linear` preset は remap せず固定 scalar point として扱う。
+
+remap 仕様:
+
+```python
+default_min, default_max = preset.default_window.get_range()
+active_min, active_max = window_settings.get_range()
+
+mapped_scalar = active_min + (
+    (preset_scalar - default_min)
+    * ((active_max - active_min) / (default_max - default_min))
+)
+```
+
+確認:
+
+- `pytest tests/viewers/test_transfer_functions.py tests/viewers/test_volume_viewer.py`
+- `ct_head_brain` などの CT preset 選択後、右ドラッグで見た目が変化する。
+- `default_linear` の既存互換が維持される。
+- gradient opacity point は active window によって変化しない。
+
+理由:
+
+- TF preset 選択後の基本操作性を安定させる。
+- Step 12 の selected preset 永続化に進む前に、保存される preset の実操作上の意味を固定する。
+
+---
+
+## 12. `feat(settings): persist selected transfer function preset`
 
 目的: 最後に選択した TF preset を次回起動時にも復元する。
 
@@ -360,7 +411,7 @@ CT の部位・観察目的別 Transfer Function preset を、既存表示互換
 
 ---
 
-## 12. `docs(tf): document transfer function preset workflow`
+## 13. `docs(tf): document transfer function preset workflow`
 
 目的: 実装後の開発・調整手順をドキュメントに反映する。
 
@@ -411,6 +462,7 @@ UI と運用:
 1. commit 10
 2. commit 11
 3. commit 12
+4. commit 13
 
 ## 実データ評価チェック
 
@@ -438,6 +490,7 @@ built-in CT preset が API 経由で切り替え可能になった時点で、�
 
 - `default_linear` が既存表示互換を維持する。
 - CT preset を UI または API から切り替えられる。
+- CT preset 選択中も WW/WL 調整で見た目が変化する。
 - `CLIPPED_SCALAR` の透明化が全 preset で維持される。
 - `PerformanceProfile` と TF preset を独立して切り替えられる。
 - user preset JSON が壊れていても built-in preset だけで起動継続できる。
