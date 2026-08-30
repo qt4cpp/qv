@@ -453,6 +453,29 @@ def build_transfer_function_registry(
     return TransferFunctionRegistry(presets=presets)
 
 
+def _remap_scalar_between_windows(
+        scalar: float,
+        *,
+        source_window: WindowSettings,
+        target_window: WindowSettings,
+) -> float:
+    """
+    Remap one scalar coordinate from the preset's default window to the
+    currently active window.
+
+    Values outside the source window are intentionally extrapolated. CT preset
+    points commonly extend beyond their default WW/WL range, and retaining
+    those relative positions preserves the preset's overall shape.
+    """
+    source_min, source_max = source_window.get_range()
+    target_min, target_max = target_window.get_range()
+
+    # WindowSettings guarantees width >= 1.0, so the denominator cannot be zero.
+    scale = (target_max - target_min) / (source_max - source_min)
+
+    return target_min + (scalar - source_min) * scale
+
+
 def build_transfer_function_points(
         *,
         preset: TransferFunctionPreset,
@@ -465,6 +488,10 @@ def build_transfer_function_points(
     default_linear is intentionally special-cased to preserve the previous
     VolumeViewer behavior exactly: window min maps to black/transparent and
     window max maps to white/opaque.
+
+    Non-default presets with a default window preserve their color/opacity
+    shape while following the active WW/WL. Presets without a default window
+    continue to use fixed scalar coordinates.
     """
     if preset.name == "default_linear":
         min_val, max_val = window_settings.get_range()
@@ -481,15 +508,48 @@ def build_transfer_function_points(
             ),
         )
 
+    color_points = preset.color_points
+    opacity_points = preset.opacity_points
+
+    if preset.default_window is not None:
+        # Only scalar coordinates are remapped. RGB and opacity values retain
+        # the shape defined by the preset.
+        color_points = tuple(
+            (
+                _remap_scalar_between_windows(
+                    scalar,
+                    source_window=preset.default_window,
+                    target_window=window_settings,
+                ),
+                red,
+                green,
+                blue,
+            )
+            for scalar, red, green, blue in preset.color_points
+        )
+        opacity_points = tuple(
+            (
+                _remap_scalar_between_windows(
+                    scalar,
+                    source_window=preset.default_window,
+                    target_window=window_settings,
+                ),
+                opacity,
+            )
+             for scalar, opacity in preset.opacity_points
+        )
+
     return TransferFunctionPoints(
         color_points=(
             (clipped_scalar, 0.0, 0.0, 0.0),
-            *preset.color_points,
+            *color_points,
         ),
         opacity_points=(
             (clipped_scalar, 0.0),
-            *preset.opacity_points,
+            *opacity_points,
         ),
+        # Gradient values represent spatial intensity changes rather than HU
+        # coordinates, so they must not follow WW/WL.
         gradient_opacity_points=preset.gradient_opacity_points,
     )
 
