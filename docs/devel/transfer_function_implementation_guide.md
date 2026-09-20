@@ -267,4 +267,4 @@ GUI のない環境では必要に応じて `QT_QPA_PLATFORM=offscreen` を指�
 CT の部位・観察目的別 Transfer Function preset の設計仕様は以下を参照する。
 
 - [Transfer Function preset 仕様](transfer_function_presets_spec.md)
-- [実装タスク（タスク12は中止、13は文書整備）](../tasks/transfer_function_presets_implementation_task.md)
+- [実装タスク（タスク12は中止、13は文書整備）](../tasks/%5BDone%5Dtransfer_function_presets_implementation_task.md)

@@ -411,7 +411,7 @@ HU として妥当でない場合は、CT preset を適用しても正しく見�
 ## 開発・調整手順
 
 built-in 追加、user JSON の保存・再読み込み、テストコマンド、手動評価の記録項目は[実装ガイド](transfer_function_implementation_guide.md)を参照する。
-タスクの履歴とタスク12の中止方針は[実装タスク](../tasks/transfer_function_presets_implementation_task.md)に記載する。
+タスクの履歴とタスク12の中止方針は[実装タスク](../tasks/%5BDone%5Dtransfer_function_presets_implementation_task.md)に記載する。
 
 ## 受け入れ基準
 
