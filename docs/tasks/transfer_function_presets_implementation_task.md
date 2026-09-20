@@ -12,7 +12,11 @@ CT の部位・観察目的別 Transfer Function preset を、既存表示互換
 2. `default_linear` を preset 経由にして既存挙動を維持する。
 3. CT preset の切り替え API を `VolumeViewer` に追加する。
 4. user preset JSON の読み書きを追加する。
-5. 値が安定してから UI と設定永続化を追加する。
+5. 値が安定してから UI を追加し、開発・調整手順を文書化する。
+
+タスク12（選択した TF preset の永続化）は中止し、実装しない。
+最後に選択した Transfer Function を次回起動時に再選択する意義が薄いため、起動時は `default_linear` を使用する。
+user preset 定義の JSON 保存 API は、この選択状態の永続化とは別機能として維持する。
 
 ## 非対象
 
@@ -338,7 +342,7 @@ CT の部位・観察目的別 Transfer Function preset を、既存表示互換
 
 - `default_linear` は active `WindowSettings` から TF point を生成するため、WW/WL 調整で見た目が変わる。
 - CT preset は HU 絶対値の `color_points` / `opacity_points` をそのまま使っているため、WW/WL の値が変わっても TF point が変わらない。
-- UI で preset 選択可能になった後の基本操作性に関わるため、selected preset 永続化より先に仕様を固定する。
+- UI で preset 選択可能になった後の基本操作性に関わるため、調整手順を文書化する前に仕様を固定する。
 
 対象:
 
@@ -377,41 +381,28 @@ mapped_scalar = active_min + (
 理由:
 
 - TF preset 選択後の基本操作性を安定させる。
-- Step 12 の selected preset 永続化に進む前に、保存される preset の実操作上の意味を固定する。
+- preset の WW/WL 操作を再現可能な調整手順として文書化できるようにする。
 
 ---
 
-## 12. `feat(settings): persist selected transfer function preset`
+## 12. 中止・実装しない: `feat(settings): persist selected transfer function preset`
 
-目的: 最後に選択した TF preset を次回起動時にも復元する。
+当初の目的: 最後に選択した TF preset を次回起動時にも復元する。
 
-対象:
+中止理由: 最後に選択した Transfer Function を次回起動時に再選択する意義が薄いため。
 
-- `qv/app/app_settings_manager.py`
-- `qv/ui/mainwindow.py`
-- `docs/devel/app_settings.md` 必要時
-- `tests/app/test_app_settings_manager.py`
-- `tests/ui/test_mainwindow.py` 必要時
+方針:
 
-このコミットでやること:
-
-- app settings に selected TF preset 名を追加する。
-- 不明な preset 名が保存されている場合は `default_linear` に fallback する。
-- preset 選択時に設定を保存する。
-- volume 初期化時に保存値を反映する。
-
-確認:
-
-- `pytest tests/app/test_app_settings_manager.py tests/ui/test_mainwindow.py tests/viewers/test_transfer_functions.py`
-- 不正な保存値でも起動が壊れない。
-
-理由:
-
-- UI 選択が入った後に永続化を追加する方が責務が明確になる。
+- selected TF preset 名を app settings に追加せず、保存・復元も実装しない。
+- 新しい `VolumeViewer` は `default_linear` で初期化する。
+- user preset 定義の JSON 読み書き（タスク7〜9）は維持する。
+- タスク12を飛ばしてタスク13へ進む。
 
 ---
 
 ## 13. `docs(tf): document transfer function preset workflow`
+
+状態: 完了。仕様書・実装ガイドを実装済み API、built-in 追加手順、user JSON の schema と接続範囲、手動評価手順に合わせて更新した。
 
 目的: 実装後の開発・調整手順をドキュメントに反映する。
 
@@ -461,8 +452,7 @@ UI と運用:
 
 1. commit 10
 2. commit 11
-3. commit 12
-4. commit 13
+3. commit 13（commit 12 は中止・実装しない）
 
 ## 実データ評価チェック
 
@@ -494,4 +484,4 @@ built-in CT preset が API 経由で切り替え可能になった時点で、�
 - `CLIPPED_SCALAR` の透明化が全 preset で維持される。
 - `PerformanceProfile` と TF preset を独立して切り替えられる。
 - user preset JSON が壊れていても built-in preset だけで起動継続できる。
-- selected preset をアプリ設定から復元できる。
+- selected preset の保存・復元は実装せず、新しい viewer は `default_linear` で開始する。

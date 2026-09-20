@@ -4,11 +4,11 @@
 
 本仕様は、`qv/viewers/volume_viewer.py` の volume rendering に対して、CT の部位・観察目的別に Transfer Function（以下 TF）を切り替えられるようにするための設計方針を定義する。
 
-既存の `transfer_function_implementation_guide.md` は TF 調整時の画質・性能ガイドであり、本書は実装仕様とプリセット設計を扱う。
+[実装ガイド](transfer_function_implementation_guide.md) は preset の追加・保存・評価手順を扱い、本書は実装済み API とデータ仕様を扱う。
 
 ## 背景
 
-現状の `VolumeViewer` は `WindowSettings` から以下の単純な TF を生成している。
+`VolumeViewer` の初期 preset `default_linear` は、`WindowSettings` から以下の TF を生成する。
 
 - Color TF: window 下限を黒、window 上限を白にする線形グレースケール
 - Opacity TF: window 下限を 0、window 上限を 1 にする線形不透明度
@@ -21,10 +21,11 @@
 1. TF preset は `PerformanceProfile` から独立させる。
 2. `default_linear` preset を用意し、既存表示との互換性を維持する。
 3. CT preset は「部位」だけでなく「観察目的」単位で分ける。
-4. UI 追加より先に、コード API と preset 値を安定させる。
+4. built-in preset はコード API と `View > Transfer Functions` メニューから選択する。
 5. DICOM tag による自動選択は初期実装では必須にしない。
 6. `CLIPPED_SCALAR` は全 preset で必ず opacity 0 とする。
-7. 標準 preset はソースコードに組み込み、ユーザー定義 preset は JSON などの外部ファイルに保存する。
+7. 標準 preset はソースコードに組み込み、ユーザー定義 preset は JSON に保存する。
+8. 最後に選択した TF preset の保存・復元は実装しない（タスク12は中止）。次回起動時に同じ TF を再選択する意義が薄いため、新しい viewer は `default_linear` で開始する。
 
 ## 責務分離
 
@@ -54,9 +55,9 @@ TF preset 名は `PerformanceProfile` に持たせない。
 
 ### TransferFunctionPreset
 
-新規モジュール `qv/viewers/transfer_functions.py` を追加し、TF preset を一元管理する。
+`qv/viewers/transfer_functions.py` で TF preset を管理する。
 
-想定 dataclass:
+実装済み dataclass:
 
 ```python
 from dataclasses import dataclass
@@ -94,8 +95,10 @@ class TransferFunctionPreset:
 TF preset はハイブリッド方式で管理する。
 
 - 標準 preset: ソースコードに組み込む
-- ユーザー定義 preset: JSON などの外部ファイルに保存する
-- 実行時: どちらも `TransferFunctionPreset` に変換し、同じ registry から参照する
+- ユーザー定義 preset: JSON に保存する
+- `build_transfer_function_registry(path)` は両者を統合した `TransferFunctionRegistry` を返す
+
+現在の `VolumeViewer` とメニューは built-in 専用 API を参照する。統合 registry を viewer に渡す API、自動読み込み、user preset の編集・選択 UI は未実装である。
 
 ### 標準 preset
 
@@ -109,17 +112,14 @@ TF preset はハイブリッド方式で管理する。
 - 型チェック、単体テスト、コードレビューがしやすい。
 - `CLIPPED_SCALAR` など実装上の特殊値と安全に統合できる。
 
-標準 preset は immutable とし、UI から直接編集できない。ユーザーが標準 preset を調整したい場合は「複製してユーザー定義 preset として保存する」流れにする。
+標準 preset の dataclass は frozen で、UI に編集機能はない。定義を複製して user preset として保存する場合は、実装ガイドの Python API 例を使う。
 
 ### ユーザー定義 preset
 
-ユーザー定義 preset はアプリ設定ディレクトリ配下の JSON ファイルに保存する。
+保存先は load/save API の `path` 引数で明示する。固定の保存場所や `AppSettingsManager` によるパス解決は未実装である。
+開発時の配置例はプロジェクトルートからの `settings/transfer_function_presets.json` とする。この場所に置くだけではアプリに読み込まれない。
 
-想定ファイル名:
-
-- `transfer_function_presets.json`
-
-JSON は schema version を持つ。
+JSON は UTF-8、対応する `schema_version` は `1`。
 
 ```json
 {
@@ -151,21 +151,32 @@ JSON は schema version を持つ。
 }
 ```
 
-保存時・読み込み時には validation を行う。
+各 preset の必須キーは `name`、`display_name`、`color_points`、`opacity_points`。
+`default_window` は省略または `null` で固定 scalar point になり、指定する場合は `level` と `width` が必要（`width >= 1.0`）。
+`gradient_opacity_points` の省略値は `[]`、`scalar_opacity_unit_distance` は省略または `null` を許容する。
+`source` は保存せず、読み込み時に `"user"` に正規化する。
+
+保存時・読み込み時には各 preset の validation を行う。
 
 検証項目:
 
-- `schema_version` が対応範囲内である。
+- `schema_version` が `1` である（読み込み時）。
 - `name` が空でない。
-- `name` が preset registry 内で一意である。
-- user preset が builtin preset と同じ `name` を使っていない。
+- `display_name` が空でない。
+- `name` が preset registry 内で一意である（読み込み・registry 構築時）。
+- user preset が builtin preset と同じ `name` を使っていない（読み込み時）。
 - color point が `(hu, r, g, b)` 形式である。
 - opacity point が `(hu, opacity)` 形式である。
+- color/opacity point は空でなく、scalar 順に並ぶ（同じ scalar 値は許容）。gradient point も勾配値順に並ぶ。
 - color 値が `0.0 <= r,g,b <= 1.0` を満たす。
 - opacity 値が `0.0 <= opacity <= 1.0` を満たす。
 - `scalar_opacity_unit_distance` が指定されている場合は `> 0.0` である。
 
-JSON の読み込みに失敗した場合は、標準 preset のみで起動を継続する。ユーザー定義 preset の破損は volume 表示不能にしない。
+`load_user_transfer_function_presets(path)` は破損・不正データやファイル欠損を例外として返す。
+`build_transfer_function_registry(path)` は読み込み例外をログに記録し、ファイル内の user preset 全体を除外して built-in のみを返す。
+現在のアプリ起動はこの JSON を読み込まないため、JSON の破損の影響を受けない。
+
+`save_user_transfer_function_presets(path, presets)` は入力の各 preset を検証し、`source == "user"` のみを入力順に保存する。親ディレクトリは自動作成し、既存ファイルは置き換える。名前の衝突は保存時には検証しないため、保存後に strict な load API で再読み込みして確認する。
 
 ### 名前衝突ルール
 
@@ -173,9 +184,9 @@ JSON の読み込みに失敗した場合は、標準 preset のみで起動を�
 
 ルール:
 
-- builtin と同名の user preset は読み込まない。
-- UI では builtin preset の直接編集を禁止する。
-- builtin preset を編集したい場合は user preset として複製保存する。
+- 名前の比較・検索は前後の空白を除去し、小文字化して行う。
+- builtin と同名の user preset がある JSON は読み込みを拒否する。
+- builtin preset を調整して保存したい場合は、別名の user preset として複製する（編集 UI は未実装）。
 - user preset 同士で同名がある場合は、後勝ちにせず validation error とする。
 
 推奨命名:
@@ -185,9 +196,9 @@ JSON の読み込みに失敗した場合は、標準 preset のみで起動を�
 
 UI 表示では `display_name` を使うため、内部名は安定した識別子として扱う。
 
-## 初期 preset
+## built-in preset
 
-初期実装では以下を定義する。
+以下の8種類を定義している。
 
 | preset | 表示名 | 目的 | 初期 WW/WL |
 |---|---|---|---:|
@@ -210,10 +221,10 @@ UI 表示では `display_name` を使うため、内部名は安定した識別�
 
 `VolumeViewer` は現在の TF preset 名を状態として持つ。
 
-追加予定 API:
+実装済み API:
 
 ```python
-def set_transfer_function_preset(self, name: str) -> None:
+def set_transfer_function_preset(self, name: str, *, render: bool = True) -> None:
     ...
 
 @property
@@ -227,11 +238,30 @@ def available_transfer_function_presets(self) -> tuple[str, ...]:
 適用手順:
 
 1. preset 名を registry から解決する。
-2. `self._transfer_function_preset` を更新する。
-3. preset に `default_window` がある場合は scalar range で clamp して `set_window_settings(..., render=False)` を呼ぶ。
+2. 同じ preset なら何もしない。異なる場合は `self._transfer_function_preset_name` を更新する。未ロードなら名前を保持して終了する。
+3. ロード済みで preset に `default_window` がある場合は `set_window_settings(..., render=False)` を呼ぶ。このメソッド内で scalar range に clamp する。
 4. 現在の `WindowSettings` と preset から color/opacity/gradient opacity を再構築する。
-5. `SetScalarOpacityUnitDistance()` が指定されていれば `vtkVolumeProperty` に適用する。
-6. `update_view()` は最後に 1 回だけ呼ぶ。
+5. `scalar_opacity_unit_distance` と gradient opacity を `vtkVolumeProperty` に反映する。
+6. TF が更新され、`render=True` なら `update_view()` を最後に1回呼ぶ。`render=False` では描画しない。
+
+`available_transfer_function_presets()` は built-in の内部名の tuple を返す。不明な名前の選択は `ValueError` となり、選択状態を変更しない。
+`update_transfer_functions()` は現在の WW/WL で TF を再適用して描画する互換 wrapper として残している。
+
+### モジュール API
+
+| API | 戻り値・役割 |
+|---|---|
+| `list_transfer_function_presets()` | built-in の `tuple[TransferFunctionPreset, ...]`（UI 表示順） |
+| `get_transfer_function_preset(name)` | built-in を取得。不明名は `ValueError` |
+| `validate_transfer_function_preset(preset)` | 単一 preset を検証。不正なら `ValueError` |
+| `load_user_transfer_function_presets(path)` | JSON を検証して user preset の tuple を返す |
+| `save_user_transfer_function_presets(path, presets)` | user preset 定義を JSON に保存する |
+| `build_transfer_function_registry(user_preset_path=None)` | built-in と user を統合した `TransferFunctionRegistry`。パス省略時は built-in のみ |
+| `registry.presets` / `registry.names()` | 定義の tuple / 内部名の tuple（built-in の後に JSON 順の user preset） |
+| `registry.get(name)` | built-in / user preset を取得。不明名は `None` |
+| `build_transfer_function_points(*, preset, window_settings, clipped_scalar)` | VTK に投入する `TransferFunctionPoints` を生成 |
+
+`TransferFunctionPoints` は `color_points`、`opacity_points`、`gradient_opacity_points` を持つ frozen dataclass である。unit distance は point に含めず、viewer が preset から直接反映する。
 
 ## default_linear の互換性
 
@@ -253,7 +283,23 @@ Opacity TF:
 
 ## CT preset の適用方針
 
-CT preset は HU 絶対値を基準に point を置く。ただし、読み込み画像の scalar range に含まれない point は VTK 側で外挿・補間されるため、preset 適用前に以下を確認する。
+CT preset は `default_window` における HU を基準に point を定義する。
+`default_window` を持つ非 `default_linear` preset（user preset を含む）は、active WW/WL に合わせて color/opacity の scalar 座標を線形 remap する。
+
+```python
+default_min, default_max = preset.default_window.get_range()
+active_min, active_max = window_settings.get_range()
+mapped_scalar = active_min + (preset_scalar - default_min) * (
+    (active_max - active_min) / (default_max - default_min)
+)
+```
+
+window 外の point も同じ式で外挿し、RGB と opacity の値は変えない。
+`default_window is None` の非 `default_linear` preset は固定 scalar point として扱う。
+gradient opacity は勾配値、unit distance は距離なので remap しない。
+`CLIPPED_SCALAR` の black / opacity 0 の point は remap 後に追加する。
+
+これにより CT preset 選択後も右ドラッグの WW/WL 調整が表示に反映される。適用前に以下を確認する。
 
 - scalar range が CT HU として妥当か
 - 最小値が空気付近、最大値が骨・造影域まで含むか
@@ -280,11 +326,11 @@ HU として妥当でない場合は、CT preset を適用しても正しく見�
 
 ## ScalarOpacityUnitDistance
 
-`vtkVolumeProperty.SetScalarOpacityUnitDistance(value)` を preset ごとに指定可能にする。
+`scalar_opacity_unit_distance` を `vtkVolumeProperty.SetScalarOpacityUnitDistance(value)` に反映する。
 
 初期値の考え方:
 
-- 未指定時は VTK 既定または現行挙動を維持する。
+- 未指定時は volume property 作成時に記録した既定値へ戻し、前の preset の値を残さない。
 - 粒状感が強い preset は `1.2` から `2.0` の範囲で比較する。
 - 値を大きくすると全体が薄くなりやすい。
 - 値を小さくすると濃くなるが、ノイズや段差が目立ちやすい。
@@ -293,7 +339,7 @@ HU として妥当でない場合は、CT preset を適用しても正しく見�
 
 `gradient_opacity_points` は任意とする。
 
-初期実装では必須にしない。導入する場合は、低勾配領域の寄与を弱める目的に限定する。
+空でなければ `vtkPiecewiseFunction` を作成して `SetGradientOpacity(...)` に渡し、gradient opacity を有効にする。空なら無効化し、前の preset の効果を残さない（無効化 API がない VTK では空の function に置き換える）。現在の built-in preset はすべて未指定である。
 
 注意:
 
@@ -302,20 +348,11 @@ HU として妥当でない場合は、CT preset を適用しても正しく見�
 
 ## UI 方針
 
-初期段階では UI 追加を必須にしない。
+`MainWindow` の `View > Transfer Functions` に built-in の `display_name` を排他的なチェック付き action として表示する。
+選択時に `VolumeViewer.set_transfer_function_preset(name)` を呼び、メニュー初期化時とメニュー選択後に viewer の状態へチェックを同期する。
+未ロードでも選択できる。user preset の編集・import/export UI は未実装である。
 
-推奨順序:
-
-1. `VolumeViewer` API で preset 切り替え可能にする。
-2. 実データで preset 値を比較・調整する。
-3. 値が安定してから UI に combo box または menu action を追加する。
-4. 必要に応じてアプリ設定に最後に選択した preset を保存する。
-
-UI 追加時の候補:
-
-- toolbar combo box
-- menu: `View > Transfer Function`
-- settings dialog の viewer 設定
+選択状態は viewer 内だけで保持する。最後の選択をアプリ設定へ保存・復元する機能は実装しない。
 
 ## 自動選択方針
 
@@ -345,6 +382,8 @@ UI 追加時の候補:
 7. builtin preset は user preset で上書きできない。
 8. user preset JSON が破損していても builtin preset の registry は利用できる。
 9. user preset JSON の schema version が未対応の場合は明確に拒否される。
+10. CT preset の color/opacity 座標が active WW/WL に追従し、gradient opacity は変化しない。
+11. user preset 定義が JSON 保存・再読み込みで同等になる。
 
 統合テスト:
 
@@ -369,21 +408,10 @@ UI 追加時の候補:
 - 低コントラスト領域の消失
 - interaction 時 FPS
 
-## 実装順序
+## 開発・調整手順
 
-1. `qv/viewers/transfer_functions.py` を追加する。
-2. `TransferFunctionPreset` と preset registry を実装する。
-3. `default_linear` を実装し、既存表示と同等にする。
-4. `VolumeViewer` に `_transfer_function_preset_name` を追加する。
-5. `VolumeViewer._apply_window_settings()` を preset 適用へ委譲する。
-6. `set_transfer_function_preset()` を追加する。
-7. `scalar_opacity_unit_distance` 適用を追加する。
-8. 必要になった段階で `gradient_opacity_points` を適用する。
-9. 単体テストを追加する。
-10. 実データで preset 値を調整する。
-11. user preset JSON の load/save と validation を追加する。
-12. UI を追加する。
-13. 設定永続化と DICOM tag による初期推定を検討する。
+built-in 追加、user JSON の保存・再読み込み、テストコマンド、手動評価の記録項目は[実装ガイド](transfer_function_implementation_guide.md)を参照する。
+タスクの履歴とタスク12の中止方針は[実装タスク](../tasks/transfer_function_presets_implementation_task.md)に記載する。
 
 ## 受け入れ基準
 
@@ -402,6 +430,6 @@ UI 追加時の候補:
 - histogram 連動の自動 opacity 初期化
 - ROI ベースの局所 TF
 - DICOM tag による initial preset 推定
-- ユーザー定義 preset の import/export
+- 統合 registry の viewer 接続と user preset の編集・import/export UI
 - ユーザー定義 preset の schema migration
 - preset ごとの thumbnail preview
