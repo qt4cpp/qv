@@ -10,7 +10,6 @@ import numpy as np
 import vtk
 from PySide6 import QtCore
 from PySide6.QtCore import QEvent
-from fontTools.colorLib import geometry
 from vtkmodules.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 
 import qv.utils.vtk_helpers as vtk_helpers
@@ -29,6 +28,12 @@ from vtkmodules.vtkCommonDataModel import vtkImplicitSelectionLoop
 from qv.core.history import Command, HistoryManager
 from qv.core.states import ClippingState
 from qv.viewers.performance_profile import PerformanceProfile, get_profile
+from qv.viewers.transfer_functions import (
+    build_transfer_function_points,
+    get_transfer_function_preset,
+    list_transfer_function_presets,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +66,8 @@ class VolumeViewer(BaseViewer):
         self.scalar_range: tuple[float, float] | None = None
         self.color_func: vtk.vtkColorTransferFunction | None = None
         self.opacity_func: vtk.vtkPiecewiseFunction | None = None
+        self.gradient_opacity_func: vtk.vtkPiecewiseFunction | None = None
+        self._default_scalar_opacity_unit_distance: float | None = None
         self.mask_image: vtk.vtkImageData | None = None
 
         self._patient_frame: PatientFrame | None = None
@@ -100,6 +107,9 @@ class VolumeViewer(BaseViewer):
         # Performance profile state
         self._performance_profile: PerformanceProfile = get_profile("quality")
         self._interactive_quality_enabled: bool = False
+
+        # Transfer function preset state
+        self._transfer_function_preset_name: str = "default_linear"
 
         super().__init__(settings_manager=settings_manager, parent=parent)
         self.vtk_widget.installEventFilter(self)
@@ -319,6 +329,9 @@ class VolumeViewer(BaseViewer):
         self.opacity_func = vtk.vtkPiecewiseFunction()
 
         self.volume_property = vtk.vtkVolumeProperty()
+        self._default_scalar_opacity_unit_distance = (
+            self.volume_property.GetScalarOpacityUnitDistance()
+        )
         self.volume_property.SetColor(self.color_func)
         self.volume_property.SetScalarOpacity(self.opacity_func)
         self.volume_property.ShadeOn()
@@ -426,6 +439,43 @@ class VolumeViewer(BaseViewer):
     @property
     def current_profile_name(self) -> str:
         return self._performance_profile.name
+
+    @property
+    def current_transfer_function_preset_name(self) -> str:
+        """Return the active transfer function preset name."""
+        return self._transfer_function_preset_name
+
+    def available_transfer_function_presets(self) -> tuple[str, ...]:
+        """Return available transfer function preset names in stable UI order."""
+        return tuple(preset.name for preset in list_transfer_function_presets())
+
+    def set_transfer_function_preset(self, name: str, *, render: bool = True) -> None:
+        """
+        Set the active transfer function preset.
+
+        The preset name is accepted even before volume data is loaded. If data is
+        already loaded, the preset's default window is applied first and the transfer
+        functions are rebuilt once with the active WindowSettings.
+        """
+        preset = get_transfer_function_preset(name)
+        if preset.name == self._transfer_function_preset_name:
+            return
+
+        self._transfer_function_preset_name = preset.name
+
+        if self.scalar_range is None:
+            return
+
+        if preset.default_window is not None:
+            self.set_window_settings(preset.default_window, render=False)
+
+        settings = self.window_settings
+        if settings is None:
+            return
+
+        changed = self._apply_window_settings(settings)
+        if changed and render:
+            self.update_view()
 
     @property
     def source_image(self) -> vtk.vtkImageData | None:
@@ -593,17 +643,56 @@ class VolumeViewer(BaseViewer):
         if self.color_func is None or self.opacity_func is None:
             return False
 
-        min_val, max_val = settings.get_range()
+        preset = get_transfer_function_preset(self._transfer_function_preset_name)
+        points = build_transfer_function_points(
+            preset=preset,
+            window_settings=settings,
+            clipped_scalar=CLIPPED_SCALAR
+        )
 
         self.color_func.RemoveAllPoints()
-        self.color_func.AddRGBPoint(CLIPPED_SCALAR, 0.0, 0.0, 0.0)
-        self.color_func.AddRGBPoint(min_val, 0.0, 0.0, 0.0)
-        self.color_func.AddRGBPoint(max_val, 1.0, 1.0, 1.0)
+        for scalar, red, green, blue in points.color_points:
+            self.color_func.AddRGBPoint(scalar, red, green, blue)
 
         self.opacity_func.RemoveAllPoints()
-        self.opacity_func.AddPoint(CLIPPED_SCALAR, 0.0)
-        self.opacity_func.AddPoint(min_val, 0.0)
-        self.opacity_func.AddPoint(max_val, 1.0)
+        for scalar, opacity in points.opacity_points:
+            self.opacity_func.AddPoint(scalar, opacity)
+
+        if self.volume_property is not None:
+            scalar_opacity_unit_distance = (
+                preset.scalar_opacity_unit_distance
+                if preset.scalar_opacity_unit_distance is not None
+                else self._default_scalar_opacity_unit_distance
+            )
+
+            if scalar_opacity_unit_distance is not None:
+                self.volume_property.SetScalarOpacityUnitDistance(
+                    scalar_opacity_unit_distance
+                )
+
+            if points.gradient_opacity_points:
+                gradient_opacity_func = vtk.vtkPiecewiseFunction()
+                for scalar, opacity in points.gradient_opacity_points:
+                    gradient_opacity_func.AddPoint(scalar, opacity)
+
+                self.gradient_opacity_func = gradient_opacity_func
+                self.volume_property.SetGradientOpacity(gradient_opacity_func)
+
+                # Some VTK builds allow gradient opacity to be explicitly disabled.
+                # Re-enable it when a preset provides gradient opacity points.
+                if hasattr(self.volume_property, "DisableGradientOpacityOff"):
+                    self.volume_property.DisableGradientOpacityOff()
+            else:
+                self.gradient_opacity_func = None
+
+                # Avoid leaving a previous preset's gradient opacity active after
+                # switching to a preset that does not provide gradient opacity points.
+                if hasattr(self.volume_property, "DisableGradientOpacityOn"):
+                    self.volume_property.DisableGradientOpacityOn()
+                else:
+                    empty_gradient_opacity_func = vtk.vtkPiecewiseFunction()
+                    self.volume_property.SetGradientOpacity(empty_gradient_opacity_func)
+            self.volume_property.Modified()
 
         return True
 
