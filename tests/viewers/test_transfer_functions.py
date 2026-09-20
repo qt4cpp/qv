@@ -13,11 +13,13 @@ from pathlib import Path
 import pytest
 
 from qv.core.window_settings import WindowSettings
+from qv.operations.clipping.clipping_operation import CLIPPED_SCALAR
 from qv.viewers.transfer_functions import (
-TransferFunctionPreset,
-get_transfer_function_preset,
-list_transfer_function_presets,
-validate_transfer_function_preset,
+    TransferFunctionPreset,
+    build_transfer_function_points,
+    get_transfer_function_preset,
+    list_transfer_function_presets,
+    validate_transfer_function_preset,
 )
 
 
@@ -382,3 +384,68 @@ def test_save_user_transfer_function_presets_excludes_builtin_presets(
 
     payload = json.loads(path.read_text(encoding="utf-8"))
     assert [item["name"] for item in payload["presets"]] == ["user_saved"]
+
+
+def test_ct_preset_scalar_points_follow_active_window_settings():
+    """
+    CT color and opacity coordinates should be linearly remapped from the
+    preset's default window to the active WW/WL.
+    """
+    preset = get_transfer_function_preset("ct_head_brain")
+
+    # Preset range: 0..80
+    # Active range: -20..140
+    # Therefore each offset from 0 is scaled by 2 and shifter by -20.
+    active_window = WindowSettings(level=60.0, width=160.0)
+
+    points = build_transfer_function_points(
+        preset=preset,
+        window_settings=active_window,
+        clipped_scalar=CLIPPED_SCALAR,
+    )
+
+    expected_scalars = (-2020.0, -20.0, 60.0, 140.0, 580.0)
+
+    assert tuple(
+        point[0] for point in points.color_points[1:]
+    ) == pytest.approx(expected_scalars)
+    assert tuple(
+        point[0] for point in points.opacity_points[1:]
+    ) == pytest.approx(expected_scalars)
+
+    # Remapping must change only scalar coordinates.
+    assert tuple(
+        point[1:] for point in points.color_points[1:]
+    ) == tuple(
+        point[1:] for point in preset.color_points
+    )
+    assert tuple(
+        point[1] for point in points.opacity_points[1:]
+    ) == tuple(
+        point[1] for point in preset.opacity_points
+    )
+
+def test_ct_preset_keeps_original_points_at_default_window():
+    """Selecting a CT preset should initially preserve its authored TF points."""
+    preset = get_transfer_function_preset("ct_head_brain")
+    assert preset.default_window is not None
+
+    points = build_transfer_function_points(
+        preset=preset,
+        window_settings=preset.default_window,
+        clipped_scalar=CLIPPED_SCALAR,
+    )
+
+    assert points.color_points == (
+        (CLIPPED_SCALAR, 0.0, 0.0, 0.0),
+        *preset.color_points,
+    )
+    assert points.opacity_points == (
+        (CLIPPED_SCALAR, 0.0),
+        *preset.opacity_points,
+    )
+
+
+def test_ct_preset_does_not_remap_gradient_opacity_points():
+    """Gradient coordinates are not HU values and must remain unchanged."""
+    
